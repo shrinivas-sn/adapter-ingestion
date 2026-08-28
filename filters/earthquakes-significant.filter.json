@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "earthquakes-significant",
+  "mode": "any",
+  "rules": [
+    { "field": "fields.magnitude", "op": "gte", "value": 5.5 },
+    { "field": "fields.tsunami",   "op": "any_of", "value": [true] }
+  ]
+}

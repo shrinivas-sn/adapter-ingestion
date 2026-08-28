@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "host": "earthquake.usgs.gov",
+  "access": { "tier": 0, "kind": "json-api", "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson" },
+  "fetch": {
+    "method": "GET",
+    "headers": { "User-Agent": "adapter-ingestion-recipe/1.0" }
+  },
+  "records_path": "features",
+  "map": {
+    "source_id":   { "path": "id" },
+    "url":         { "path": "properties.url" },
+    "title":       { "path": "properties.title",       "normalize": "text" },
+    "place":       { "path": "properties.place",       "normalize": "text" },
+    "magnitude":   { "path": "properties.mag",         "normalize": "number" },
+    "occurred_at_epoch_ms": { "path": "properties.time", "normalize": "number" },
+    "status":      { "path": "properties.status",      "normalize": "text" },
+    "tsunami":     { "path": "properties.tsunami",     "normalize": "bool" },
+    "longitude":   { "path": "geometry.coordinates.0", "normalize": "number" },
+    "latitude":    { "path": "geometry.coordinates.1", "normalize": "number" },
+    "depth_km":    { "path": "geometry.coordinates.2", "normalize": "number" }
+  },
+  "required": ["source_id", "url", "title", "magnitude"],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.4,
+    "required_field_ratio": 0.9,
+    "max_staleness_days": 1
+  },
+  "fixtures": ["fixtures/earthquake.usgs.gov/sample-1.json"],
+  "generated_at": "2026-08-28",
+  "generator_model": "claude-sonnet-5",
+  "verified_against_fixtures": "5/5"
+}
