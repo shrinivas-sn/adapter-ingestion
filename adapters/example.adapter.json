@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "host": "<HOST>",
+  "access": { "tier": 1, "kind": "json-api", "url": "https://<HOST>/<PATH>" },
+  "fetch": {
+    "method": "GET",
+    "headers": { "User-Agent": "<BROWSER_UA>" },
+    "pagination": { "style": "page-param", "param": "page", "per_page_param": "per_page", "per_page": 100, "max_pages": 10 },
+    "incremental": { "param": "<PARAM>", "type": "iso-date" }
+  },
+  "records_path": "$",
+  "map": {
+    "source_id": { "path": "id" },
+    "url":       { "path": "link" },
+    "title":     { "path": "title.rendered", "normalize": "text" },
+    "posted_at": { "path": "date",           "normalize": "iso-date" },
+    "price":     { "path": "meta.amount",    "normalize": "number" }
+  },
+  "required": ["source_id", "url", "title"],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.4,
+    "required_field_ratio": 0.9,
+    "max_staleness_days": 14
+  },
+  "fixtures": ["fixtures/<HOST>/sample-1.json"],
+  "generated_at": "<YYYY-MM-DD>",
+  "generator_model": "<MODEL>",
+  "verified_against_fixtures": "5/5"
+}
