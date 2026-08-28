@@ -1,0 +1,42 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { buildUrl, fetchAll } from '../src/fetch.mjs';
+
+const adapter = {
+  host: 'example.test', records_path: '$',
+  access: { kind: 'json-api', url: 'https://example.test/api' },
+  fetch: {
+    method: 'GET',
+    headers: { 'User-Agent': '<BROWSER_UA>' },
+    pagination: { style: 'page-param', param: 'page', per_page_param: 'per_page', per_page: 2, max_pages: 3 },
+    incremental: { param: 'after', type: 'iso-date' },
+  },
+};
+const ok = (body) => ({ ok: true, status: 200, json: async () => body });
+
+test('buildUrl adds pagination and incremental params', () => {
+  const u = new URL(buildUrl(adapter, { page: 2, since: '2026-01-01' }));
+  assert.equal(u.searchParams.get('page'), '2');
+  assert.equal(u.searchParams.get('per_page'), '2');
+  assert.equal(u.searchParams.get('after'), '2026-01-01');
+});
+
+test('the configured User-Agent is sent on every request', async () => {
+  const seen = [];
+  const impl = async (url, init) => { seen.push(init.headers['User-Agent']); return ok([]); };
+  await fetchAll(adapter, { fetchImpl: impl });
+  assert.deepEqual(seen, ['<BROWSER_UA>']);
+});
+
+test('pagination stops on a short page and respects max_pages', async () => {
+  let page = 0;
+  const impl = async () => ok(++page <= 5 ? [{ id: page * 10 }, { id: page * 10 + 1 }] : []);
+  const { items, pages } = await fetchAll(adapter, { fetchImpl: impl });
+  assert.equal(pages, 3);
+  assert.equal(items.length, 6);
+});
+
+test('a non-ok status throws with the status code, so a UA block fails loudly', async () => {
+  const impl = async () => ({ ok: false, status: 403, json: async () => ({}) });
+  await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), /403/);
+});
