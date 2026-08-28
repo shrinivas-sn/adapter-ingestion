@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "name": "<NAME>",
+  "mode": "all",
+  "rules": [
+    { "field": "fields.category", "op": "any_of",       "value": ["<A>", "<B>"] },
+    { "field": "fields.price",    "op": "between",      "min": 0, "max": 25000 },
+    { "field": "fields.deadline", "op": "within_days",  "value": 60 },
+    { "field": "fields.title",    "op": "excludes_any", "value": ["<WORD>"] }
+  ]
+}
