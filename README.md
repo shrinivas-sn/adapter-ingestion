@@ -5,7 +5,8 @@ generated once by an LLM; a plain-rules runner applies it on every cron at zero 
 relevance filter is a read-time view over stored records, never a write-time gate. A
 canary flags a stale adapter — loudly — when a source changes shape.
 
-Full design authority: `E:\dev-recipes\SPEC-generated-adapter-ingestion.md`.
+Full design authority: the "Reference spec" section of
+`E:\dev-recipes\generated-adapter-ingestion\README.md`.
 
 ## Flow
 
