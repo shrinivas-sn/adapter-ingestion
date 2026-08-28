@@ -1,0 +1,7 @@
+{
+  "name": "adapter-ingestion",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": { "test": "node --test test/", "ingest": "node src/run.mjs" }
+}
