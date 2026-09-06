@@ -1,6 +1,6 @@
 {
   "name": "@shrinivas-sn/adapter-ingestion",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Generic fetch -> extract -> dedupe -> store pipeline for adapter-driven ingestion from sites with no API, plus a read-time relevance filter and a canary that flags a stale adapter when a source changes shape.",
   "type": "module",
   "engines": {
