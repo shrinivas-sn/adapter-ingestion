@@ -14,6 +14,42 @@ are this repo's own worked examples and dev tooling, not part of the installed p
 consuming app supplies its own adapter JSON and calls `runIngest` from the installed
 package against it.
 
+## Publishing
+
+Versioned with [Changesets](https://github.com/changesets/changesets), published via
+GitHub Actions using npm's OIDC **trusted publishing** — no long-lived `NPM_TOKEN` secret.
+Matches the same pattern as `@shrinivas-sn/verify-claims`.
+
+**Normal flow:** merge a PR with a changeset (`.changeset/*.md`) into `main`. The
+`release.yml` workflow opens a "Version Packages" PR (bumps `package.json`, writes
+`CHANGELOG.md`). Merging *that* PR re-runs `release.yml`, which now sees no pending
+changeset and publishes via `changeset publish`.
+
+**First-publish bootstrap (already done, 06/09/2026 — kept here for the next package that
+needs it):** unlike PyPI, npm requires a package to already exist before a Trusted
+Publisher can be linked to it — there is no way to pre-register OIDC trust for a brand-new
+name. So the very first version has to go up the old way:
+
+1. `npm login` (interactive, needs 2FA) — one time, locally.
+2. `npm publish` from a clean checkout — creates the package on the registry.
+3. npmjs.com → the package → Settings → Trusted Publishing → add a GitHub Actions
+   publisher: org/user, repo, and the exact workflow **filename** (`release.yml`).
+4. From then on, `release.yml`'s own `id-token: write` permission lets it publish without
+   ever touching an npm token.
+
+**Known issue, not a misconfiguration:** the automated OIDC publish can fail with
+`E404: Not Found - PUT https://registry.npmjs.org/@scope%2fname` on a scoped package, even
+with Trusted Publishing correctly configured and the OIDC token itself accepted (provenance
+signs successfully; the failure is on the actual `PUT`). This matches other users' reports
+against the same `changesets/action`/npm CLI combination — see
+[npm/cli#8976](https://github.com/npm/cli/issues/8976) (and the issues it links, #8730,
+#8678) — not anything specific to this repo's config; a diff against `verify-claims`'
+working `release.yml` (which hits the same registry the same way) turned up no material
+difference. **Workaround when it happens:** `npm login` (if the local session lapsed) then
+`npm publish` from a checkout of the version `release.yml` failed to publish — same
+mechanism as the bootstrap above, just for a version after the first. Automation resumes on
+its own for the *next* release; nothing needs to be reverted or reconfigured.
+
 ## Flow
 
 ```
