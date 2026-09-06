@@ -6,8 +6,16 @@ function text(v) {
   if (v === null || v === undefined) return null;
   return String(v)
     .replace(/<[^>]*>/g, '')
+    // Numeric character references (&#8211; an en dash, &#038; a
+    // double-encoded ampersand -- both routine in WordPress titles) must be
+    // decoded to the character they represent, not deleted: dropping them
+    // silently mangled every title containing one into readable-looking but
+    // wrong text (a missing dash reads as a stray double space, not an
+    // obvious defect) -- found integrating a real WordPress source.
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
     .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#\d+;/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/\s+/g, ' ')
     .trim() || null;
 }

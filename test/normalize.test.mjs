@@ -7,6 +7,16 @@ test('text collapses whitespace, strips tags and entities', () => {
   assert.equal(applyNormalizer('text', null), null);
 });
 
+test('numeric character references are decoded, not deleted', () => {
+  // Real WordPress title text: &#8211; is an en dash, &#038; is a
+  // double-encoded ampersand. Deleting them (an earlier version of this
+  // normalizer did) silently mangles the title -- a missing dash just
+  // reads as a stray double space, not an obvious defect.
+  assert.equal(applyNormalizer('text', 'KPSC Recruitment &#8211; 319 Posts'), 'KPSC Recruitment – 319 Posts');
+  assert.equal(applyNormalizer('text', 'Worker &#038; Helper'), 'Worker & Helper');
+  assert.equal(applyNormalizer('text', 'Caf&#x00e9;'), 'Café');
+});
+
 test('number strips currency, separators and units', () => {
   assert.equal(applyNormalizer('number', '  ₹ 25,000/month '), 25000);
   assert.equal(applyNormalizer('number', '1.5'), 1.5);
