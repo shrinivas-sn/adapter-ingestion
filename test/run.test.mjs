@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runIngest } from '../src/run.mjs';
 import { readRecords } from '../src/store.mjs';
+import { readHistory } from '../src/report.mjs';
 
 const adapter = {
   version: 1, host: 'example.test',
@@ -62,5 +63,43 @@ test('a renamed source field surfaces as a stale canary, not a silent success', 
   const { report, canary } = await runIngest({ adapter, paths, fetchImpl: impl(renamed), now: new Date() });
   assert.equal(report.stages.parsed, 0);
   assert.equal(canary.status, 'stale');
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('a run that throws still writes a report naming the failure, then rethrows', async () => {
+  const { dir, paths } = await tmpPaths();
+  const boom = async () => { throw new Error('DNS lookup failed'); };
+  await assert.rejects(
+    () => runIngest({ adapter, paths, fetchImpl: boom, now: new Date() }),
+    /DNS lookup failed/,
+  );
+  const history = await readHistory(paths.runsDir, 5);
+  assert.equal(history.length, 1, 'a report artifact must exist even though the run threw');
+  assert.match(history[0].fatal_error, /DNS lookup failed/);
+  assert.equal(history[0].stages.fetched, 0);
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('a real collapse is not masked by the median-window off-by-one', async () => {
+  const { dir, paths } = await tmpPaths();
+  const many = Array.from({ length: 10 }, (_, i) => (
+    { id: i, link: `https://example.test/${i}`, title: `Item ${i}` }
+  ));
+  const few = many.slice(0, 3);
+  // 5 healthy runs of 10 records set the trailing median at 10
+  // (threshold 10 * count_drop_ratio 0.4 = 4). A 6th run parsing 3 sits
+  // below that threshold but above min_records — the only way to fail is
+  // count_drop_ratio, which needs the full median_window of past runs to
+  // fire. Before the off-by-one fix, readHistory's window silently lost one
+  // past run every time, and the same numbers came back "ok".
+  for (let i = 0; i < 5; i++) {
+    await runIngest({ adapter, paths, fetchImpl: impl(many), now: new Date(2026, 0, i + 1) });
+  }
+  const { report, canary } = await runIngest({
+    adapter, paths, fetchImpl: impl(few), now: new Date(2026, 0, 6),
+  });
+  assert.equal(report.stages.parsed, 3);
+  assert.equal(canary.status, 'stale');
+  assert.match(canary.breaches.join(' '), /count_drop_ratio/);
   await rm(dir, { recursive: true, force: true });
 });

@@ -26,7 +26,8 @@
     "median_window": 5,
     "count_drop_ratio": 0.4,
     "required_field_ratio": 0.9,
-    "max_staleness_days": 1
+    "max_staleness_days": 1,
+    "staleness_field": "occurred_at_epoch_ms"
   },
   "fixtures": ["fixtures/earthquake.usgs.gov/sample-1.json"],
   "generated_at": "2026-08-28",

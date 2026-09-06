@@ -40,3 +40,41 @@ test('a non-ok status throws with the status code, so a UA block fails loudly', 
   const impl = async () => ({ ok: false, status: 403, json: async () => ({}) });
   await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), /403/);
 });
+
+test('a records_path that resolves to a string throws instead of being spread character-by-character', async () => {
+  // Strings are iterable — an unguarded `...batch` would silently "paginate"
+  // through individual characters as if they were records.
+  const impl = async () => ok('not-an-array');
+  await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), /expected an array/);
+});
+
+test('a records_path that resolves to an object throws a clear error', async () => {
+  const impl = async () => ok({ message: 'rest_post_invalid_page_number' });
+  await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), /expected an array/);
+});
+
+test('every request carries an abort signal so a hung connection can be cut off', async () => {
+  let seenSignal;
+  const impl = async (url, init) => { seenSignal = init.signal; return ok([]); };
+  await fetchAll(adapter, { fetchImpl: impl });
+  assert.ok(seenSignal instanceof AbortSignal, 'fetchImpl must receive a real AbortSignal');
+});
+
+test('a timeout-shaped abort is reported as a timeout, not a generic failure', async () => {
+  // Exercises the error-message branch fetchAll takes when the signal fires,
+  // without depending on a real timer actually elapsing in the test run.
+  const impl = async () => { throw new DOMException('aborted', 'TimeoutError'); };
+  await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), /timed out/);
+});
+
+test('a response over max_response_bytes is rejected before the body is read', async () => {
+  const capped = { ...adapter, fetch: { ...adapter.fetch, max_response_bytes: 100 } };
+  let bodyRead = false;
+  const impl = async () => ({
+    ok: true, status: 200,
+    headers: { get: (k) => (k === 'content-length' ? '999999' : null) },
+    json: async () => { bodyRead = true; return []; },
+  });
+  await assert.rejects(() => fetchAll(capped, { fetchImpl: impl }), /too large/);
+  assert.equal(bodyRead, false);
+});

@@ -24,5 +24,26 @@ export function checkCanary(report, history, cfg) {
     breaches.push(`count_drop_ratio: parsed ${parsed} vs trailing median ${med}`);
   }
 
+  // Count-based checks above can't catch a source that freezes: an
+  // unpaginated feed, or an incremental cursor that silently stops
+  // advancing, keeps serving a full page of records forever, and every
+  // count check keeps passing while the data underneath goes stale.
+  if (cfg.max_staleness_days && cfg.staleness_field) {
+    const newest = report.newest_staleness_value;
+    if (newest === null || newest === undefined) {
+      breaches.push(`staleness: no value found for staleness_field "${cfg.staleness_field}" in this run`);
+    } else {
+      const ageMs = Date.now() - new Date(newest).getTime();
+      const ageDays = ageMs / 86_400_000;
+      if (!Number.isFinite(ageDays)) {
+        breaches.push(`staleness: staleness_field "${cfg.staleness_field}" value "${newest}" is not a valid date`);
+      } else if (ageDays > cfg.max_staleness_days) {
+        breaches.push(
+          `staleness: newest ${cfg.staleness_field} is ${ageDays.toFixed(1)} days old, exceeds max_staleness_days ${cfg.max_staleness_days}`,
+        );
+      }
+    }
+  }
+
   return { status: breaches.length ? 'stale' : 'ok', breaches };
 }

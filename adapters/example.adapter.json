@@ -22,7 +22,8 @@
     "median_window": 5,
     "count_drop_ratio": 0.4,
     "required_field_ratio": 0.9,
-    "max_staleness_days": 14
+    "max_staleness_days": 14,
+    "staleness_field": "posted_at"
   },
   "fixtures": ["fixtures/<HOST>/sample-1.json"],
   "generated_at": "<YYYY-MM-DD>",

@@ -1,7 +1,7 @@
 import { mkdir, writeFile, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export function buildReport({ host, startedAt, finishedAt, stages, errors = [] }) {
+export function buildReport({ host, startedAt, finishedAt, stages, errors = [], fatalError = null, newestStalenessValue = null }) {
   return {
     host,
     started_at: startedAt,
@@ -10,6 +10,11 @@ export function buildReport({ host, startedAt, finishedAt, stages, errors = [] }
     stages,
     error_count: errors.length,
     errors: errors.slice(0, 20),
+    // Set only when the run threw before completing -- a cron with no
+    // report artifact at all fails invisibly for weeks, but so does one
+    // whose report never says *why* a run came up empty.
+    fatal_error: fatalError,
+    newest_staleness_value: newestStalenessValue,
   };
 }
 
