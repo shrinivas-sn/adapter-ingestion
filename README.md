@@ -151,6 +151,26 @@ whenever adding a new source, pointed at the new adapter/fixture.
   explicitly in its adapter file — the defaults exist so an unattended cron run can't hang
   indefinitely or OOM the runner on a single misbehaving or hostile response.
 
+## Known gap: unstructured text extraction
+
+`extract.mjs`/`normalize.mjs` today only understand **structural** field access — a path
+into JSON (`geometry.coordinates.0`) through a typed normalizer. Every adapter built so
+far only pulls fields that already sit at a fixed path: title, url, dates, raw HTML.
+
+Some sources bury the fields that actually matter (an organization name, a deadline date,
+a qualification list) inside **unstructured prose in one HTML blob**, findable only by a
+labeled-text pattern ("Organization Name: ...", "Last date: ..."). There's no declarative
+primitive for that today — pulling it out currently means bespoke regex written in the
+*consuming app*, outside the adapter file, which is exactly the per-source special-casing
+this framework exists to avoid.
+
+Adding one (e.g. a `text_labels`-style extractor in the adapter config, generic over a
+label list) is possible without hardcoding any single source into `src/` — it would sit
+as a new declarative extractor alongside the existing structural one, same pattern as
+`normalize.mjs`'s per-type functions. Whether it's worth building depends on how many real
+sources actually need it versus how many are already structurally clean (like the
+earthquake feed) — open question, not decided here.
+
 ## Non-goals
 
 Not a general-purpose scraper, not a dashboard/analytics/storage product, not a hosted
