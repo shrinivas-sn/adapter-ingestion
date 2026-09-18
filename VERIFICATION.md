@@ -782,3 +782,61 @@ and already time-safe (real wall-clock `now`, proven correct in Task 10).
   session; see K03 in TEST-MATRIX.md.
 
 **Deviations from plan:** None identified.
+
+## Task 11 addendum — the actual GitHub Actions run (K03), and what it caught
+
+**Date:** 2026-09-18, same session, after PR #3 was opened against `main` on user request.
+
+**PR:** https://github.com/shrinivas-sn/adapter-ingestion/pull/3
+**First run (all 6 matrix cells):** https://github.com/shrinivas-sn/adapter-ingestion/actions/runs/35373684927 — 3/6 failed (`ubuntu-latest` × 22/22.15.0/24), 3/6 passed (`windows-latest` × 22/22.15.0/24).
+**Second run, after the fix below:** https://github.com/shrinivas-sn/adapter-ingestion/actions/runs/35374076499 — **6/6 passed**, every step ran to completion (not short-circuited): `npm ci`, `npm test` (full 281-test suite), `node scripts/verify-package.mjs`, and — confirmed via the GitHub API's per-step `conclusion`, not just the overall check — the scale-proof step actually executed (not skipped) on both `ubuntu-latest`/Node 24 and `windows-latest`/Node 24, and actually skipped (not silently absent) on every other cell, exactly matching `ci.yml`'s `if: matrix.node-version == '24'` condition.
+
+**What actually failed, and why this was one root cause, not several:** all three failing
+jobs failed on the exact same single test — `CLI: SIGINT aborts gracefully mid-fetch`,
+confirmed by pulling each job's raw log directly (`gh api .../jobs/<id>/logs`) rather than
+trusting the PR checks summary alone. 280/281 other tests passed on every one of the three
+failing jobs; the failure was not Node-version-dependent (identical on 22, 22.15.0, and 24),
+consistent with a single deterministic cause rather than three distinct problems.
+
+**Root cause (verified independently, not assumed from the failure message):** the test's
+assertion — "an abort mid-fetch must never mutate the store" — checked
+`pathExists(join(cwd, 'store'))`, the whole directory. But `withStoreLock`
+(`src/lock.mjs`, `resolveCanonicalStoreFile`) creates the store file's *parent directory*
+(`mkdir(parent, {recursive:true})`) as an unavoidable, already-proven-correct step of
+*acquiring* the lock — before its callback (which contains `fetchAll`) is ever invoked. So
+by the time a SIGINT lands and aborts the in-flight fetch, `store/` already legitimately
+exists; no record data was ever written to it. This is Task 8's own, already-tested
+behavior (`lock.test.mjs`: "a missing parent directory is created, not treated as a
+failure") — nothing about it was introduced or changed by this task. Confirmed directly,
+not inferred: a standalone probe script called `withStoreLock` with a callback that
+inspects the filesystem *before* throwing (simulating an abort) —
+
+```
+inside callback: store dir exists? true -- store file exists? false
+callback threw as expected: simulated abort inside callback
+after: store file exists? false -- lock file exists? false
+```
+
+— proving both that the directory's existence is expected/harmless and that the lock
+itself is still released cleanly (not leaked) when the callback throws.
+
+**The fix** (commit `5fef967`) narrows the assertion to what "store mutation" actually
+means: the store *file* (`store/127.0.0.1.jsonl`) must not exist (no record data written),
+and the *lock file* must not exist either (proving clean release, not just absence of data)
+— both stronger, more precise claims than the original directory-existence check, not a
+weakened one. The other two directory-level `pathExists` assertions elsewhere in
+`test/cli.test.mjs` (the missing-host test, and the library-import test) were checked and
+left unchanged — in both of those, `runIngest`/`withStoreLock` is never invoked at all, so
+the directory genuinely never gets created; those assertions were already correct.
+
+**Windows already passed on the first run** for an unrelated, already-documented reason
+(the SIGINT test is skipped there — Windows cannot deliver a real signal to a spawned child
+process, verified empirically before this task's original commit) — the fix only changed
+behavior on the Linux/macOS code path this test actually exercises.
+
+This addendum exists specifically because a real CI run is a different, stronger oracle
+than local-only verification: the original Task 11 entry above notes local success never
+proves K03, and this is exactly why — a directory-vs-file assertion mistake that a local
+Windows session's `t.skip()` never exercised was caught the first time this test actually
+ran for real, on the platform it was written to prove something about. K03 is now `pass`
+in TEST-MATRIX.md, on real evidence, not local success.
