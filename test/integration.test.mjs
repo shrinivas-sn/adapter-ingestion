@@ -1,9 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
+import { fork } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { readFile, writeFile, unlink, readdir, stat, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fetchAll } from '../src/fetch.mjs';
 import { safeFailure } from '../src/errors.mjs';
+import { runIngest } from '../src/run.mjs';
+import { readRecords, readIndex, readLatestRecords } from '../src/store.mjs';
+import { extractAll } from '../src/extract.mjs';
 import { startServer } from './helpers/http-server.mjs';
+import { tempPaths, loadAdapterFixture, newestStalenessInstant } from './helpers/fixtures.mjs';
+
+const workerPath = fileURLToPath(new URL('./helpers/store-worker.mjs', import.meta.url));
+
+function waitForMessage(child, predicate) {
+  return new Promise((resolve) => {
+    function onMessage(m) {
+      if (predicate(m)) {
+        child.off('message', onMessage);
+        resolve(m);
+      }
+    }
+    child.on('message', onMessage);
+  });
+}
 
 function baseAdapter(origin, overrides = {}) {
   // No pagination by default -- these transport-focused tests care about
@@ -426,4 +449,366 @@ test('H02: bytes from a stalled, retried attempt are still counted toward the cu
   // timing out; if only the small successful second attempt were counted,
   // this would be nowhere close.
   assert.ok(diagnostics.bytes > 4000, `expected cumulative bytes to include the stalled attempt, got ${diagnostics.bytes}`);
+});
+
+// --- E02: a native two-page endpoint where page 2 exhausts retries on 503 ---
+
+test('E02: page 1 succeeds, page 2 exhausts retries on 503 -- store stays byte-identical, no partial ingestion', async (t) => {
+  const { storeFile, runsDir } = await tempPaths(t);
+  // Seed existing store content before the failing run, to prove the failed
+  // run truly writes nothing -- not just that an already-empty file stays empty.
+  const seeded = `${JSON.stringify({ id: 'seed:1', content_hash: 'seedhash', fields: { source_id: 'seed', url: 'https://example.test/seed' } })}\n`;
+  await writeFile(storeFile, seeded, 'utf8');
+
+  let page2Calls = 0;
+  const { origin, close } = await startServer({
+    '/data': (req, res) => {
+      const page = new URL(req.url, 'http://x').searchParams.get('page') ?? '1';
+      if (page === '1') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([{ id: 'a', link: 'https://example.test/a', title: 'A' }]));
+        return;
+      }
+      page2Calls++;
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end('{}');
+    },
+  });
+  t.after(close);
+
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: {
+      method: 'GET',
+      // per_page 1: page 1's single item equals per_page (not a short page),
+      // so pagination genuinely continues on to page 2.
+      pagination: { style: 'page-param', param: 'page', max_pages: 5, per_page: 1 },
+      retry: { max_attempts: 2, backoff_ms: 5, max_delay_ms: 50 },
+    },
+    records_path: '$',
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+
+  let caught;
+  try {
+    await runIngest({ adapter, paths: { storeFile, runsDir }, fetchImpl: fetch, now: new Date() });
+    assert.fail('expected runIngest to reject once page 2 exhausts retries');
+  } catch (err) {
+    caught = err;
+  }
+  assert.equal(caught.report.outcome, 'error');
+  assert.equal(caught.report.failure.code, 'E_HTTP_STATUS');
+  assert.equal(caught.report.stages.fetched, 0, 'fetchAll never returned -- a genuine failure, not a partial ingestion');
+  assert.equal(caught.report.storage.status, 'not_started');
+  assert.ok(page2Calls >= 2, 'page 2 must actually have been retried, not failed on the first attempt alone');
+  assert.ok(caught.report.failure.details?.fetch?.statuses?.includes(200),
+    'the failure detail must still show page 1\'s progress, not just the final error');
+  assert.equal(await readFile(storeFile, 'utf8'), seeded, 'the store must remain byte-identical to the seeded content');
+});
+
+// --- E03: a report-write failure after a successful append preserves committed storage; a recovered replay adds nothing ---
+
+test('E03: runsDir-as-file forces E_REPORT_WRITE after a successful append; a recovered replay adds zero new lines', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'e03-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const storeFile = join(dir, 'store.jsonl');
+  const blockedRunsDir = join(dir, 'runs-blocked');
+  await writeFile(blockedRunsDir, 'not a directory');
+
+  const { adapter: snapshotAdapter, fixtureRoot } = await loadAdapterFixture('earthquake.usgs.gov');
+  // Incremental mode (vs. this same adapter's default snapshot mode) skips
+  // the eligible-history scan entirely -- otherwise that scan hits the same
+  // blocked runsDir first (E_REPORT_READ), before ever reaching the final
+  // writeReport call this test means to isolate (matches run.test.mjs's O01
+  // incremental case, which documents the same snapshot-vs-incremental split).
+  const adapter = { ...snapshotAdapter, fetch: { ...snapshotAdapter.fetch, incremental: { param: 'since', type: 'iso-date' } } };
+  const now = new Date(newestStalenessInstant(adapter, fixtureRoot) + 12 * 3600 * 1000);
+  const impl = async () => new Response(JSON.stringify(fixtureRoot), { status: 200 });
+
+  let caught;
+  try {
+    await runIngest({ adapter, paths: { storeFile, runsDir: blockedRunsDir }, since: '2026-01-01', now, fetchImpl: impl });
+    assert.fail('expected the report write to fail');
+  } catch (err) {
+    caught = err;
+  }
+  assert.equal(caught.code, 'E_REPORT_WRITE');
+  assert.equal(caught.report.storage.status, 'committed');
+  assert.ok(caught.report.storage.written > 0);
+
+  const before = await readFile(storeFile, 'utf8');
+  const recoveredRunsDir = join(dir, 'runs-recovered');
+  const rerun = await runIngest({ adapter, paths: { storeFile, runsDir: recoveredRunsDir }, since: '2026-01-01', now, fetchImpl: impl });
+  assert.equal(rerun.report.stages.written, 0);
+  assert.equal(await readFile(storeFile, 'utf8'), before);
+});
+
+// --- L01 completion: the real runIngest orchestration boundary, across two real processes ---
+
+test('L01 (orchestration): a contender runIngest fails on the lock before any HTTP request; a later replay adds zero duplicates', async (t) => {
+  const p = await tempPaths(t);
+  let requestCount = 0;
+  let resolveRequestReceived;
+  const requestReceived = new Promise((resolve) => { resolveRequestReceived = resolve; });
+  let resolveGate;
+  const gate = new Promise((resolve) => { resolveGate = resolve; });
+  const gatedItems = [{ id: 'g1', link: 'https://example.test/g1', title: 'Gated' }];
+
+  const { origin, close } = await startServer({
+    '/data': async (req, res) => {
+      requestCount++;
+      resolveRequestReceived();
+      await gate;
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(gatedItems));
+    },
+  });
+  t.after(close);
+
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { method: 'GET', retry: { max_attempts: 1 } },
+    records_path: '$',
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const paths = { storeFile: p.storeFile, runsDir: p.runsDir };
+  const now = Date.parse('2026-09-18T00:00:00Z');
+
+  const owner = fork(workerPath, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
+  t.after(() => { if (owner.exitCode === null && !owner.killed) owner.kill(); });
+  await waitForMessage(owner, (m) => m.event === 'ready');
+  owner.send({ cmd: 'run-ingest', adapter, paths, now });
+
+  // Once the gated server has actually received a request, run.mjs's own
+  // lock-then-fetch ordering guarantees the owner already holds the store
+  // lock -- fetchAll is only ever invoked from inside withStoreLock's callback.
+  await requestReceived;
+
+  const contender = fork(workerPath, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
+  t.after(() => { if (contender.exitCode === null && !contender.killed) contender.kill(); });
+  await waitForMessage(contender, (m) => m.event === 'ready');
+  contender.send({ cmd: 'run-ingest', adapter, paths, now });
+  const contenderResult = await waitForMessage(contender, (m) => m.event === 'run-error' || m.event === 'run-done');
+  await new Promise((resolve) => contender.once('exit', resolve));
+
+  assert.equal(contenderResult.event, 'run-error', 'the contender must fail, never complete');
+  assert.equal(contenderResult.code, 'E_STORE_LOCKED');
+  assert.equal(requestCount, 1, 'the contender must never have issued an HTTP request');
+
+  resolveGate();
+  const ownerResult = await waitForMessage(owner, (m) => m.event === 'run-done' || m.event === 'run-error');
+  await new Promise((resolve) => owner.once('exit', resolve));
+  assert.equal(ownerResult.event, 'run-done');
+  assert.equal(ownerResult.report.outcome, 'ok');
+  assert.equal(ownerResult.report.stages.written, 1);
+
+  const before = await readFile(p.storeFile, 'utf8');
+  const replay = await runIngest({ adapter, paths, fetchImpl: fetch, now: new Date(now) });
+  assert.equal(replay.report.stages.written, 0, 'a later replay must add zero duplicates');
+  assert.equal(await readFile(p.storeFile, 'utf8'), before);
+});
+
+// --- E04: a process killed mid-append leaves a synced valid line and a corrupt partial tail ---
+
+test('E04: a process killed mid-append leaves a real corrupt tail; explicit recovery + replay heals the store', async (t) => {
+  const p = await tempPaths(t);
+  const adapter = {
+    version: 1, host: 'example.test',
+    access: { tier: 0, kind: 'json-api', url: 'https://example.test/api' },
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const item1 = { id: 1, link: 'https://example.test/1', title: 'One' };
+  const item2 = { id: 2, link: 'https://example.test/2', title: 'Two' };
+  const { records } = extractAll([item1, item2], adapter, { fetchedAt: new Date('2026-09-18T00:00:00Z').toISOString() });
+  const [record1, record2] = records;
+  const validLine = JSON.stringify(record1);
+  const fullSecondLine = JSON.stringify(record2);
+  const partialLine = fullSecondLine.slice(0, Math.floor(fullSecondLine.length / 2));
+
+  const worker = fork(workerPath, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
+  await waitForMessage(worker, (m) => m.event === 'ready');
+  worker.send({ cmd: 'hold-lock-partial-write', storeFile: p.storeFile, runId: 'crashed-worker', validLine, partialLine });
+  await waitForMessage(worker, (m) => m.event === 'partial_written');
+
+  worker.kill();
+  await new Promise((resolve) => worker.once('exit', resolve));
+
+  // The crash genuinely left the lock in place.
+  const lockMeta = JSON.parse(await readFile(`${p.storeFile}.lock`, 'utf8'));
+  assert.equal(lockMeta.run_id, 'crashed-worker');
+
+  // Explicit, out-of-band recovery -- the only sanctioned way to clear a
+  // lock left by a confirmed-dead process (proved separately by lock.test.mjs's L02).
+  await unlink(`${p.storeFile}.lock`);
+
+  const preReplayWarnings = [];
+  const indexBeforeReplay = await readIndex(p.storeFile, { onWarning: (w) => preReplayWarnings.push(w) });
+  assert.equal(indexBeforeReplay.get(record1.id), record1.content_hash, 'the earlier, fully-synced record survives the crash');
+  assert.ok(preReplayWarnings.some((w) => w.code === 'W_STORE_CORRUPT_LINE'), 'the partial tail is warned, not silently accepted');
+
+  const { report } = await runIngest({
+    adapter, paths: { storeFile: p.storeFile, runsDir: p.runsDir },
+    fetchImpl: async () => new Response(JSON.stringify([item1, item2]), { status: 200 }),
+    now: new Date('2026-09-18T00:00:00Z'),
+  });
+  assert.equal(report.stages.unchanged, 1, 'the earlier record needs no rewrite');
+  assert.equal(report.stages.fresh, 1, 'the record whose tail was corrupt reappears exactly once');
+  assert.equal(report.stages.written, 1);
+  assert.ok(report.warning_count >= 1, 'the corrupt-tail warning surfaces on the real replay too');
+
+  // No fabricated report exists for the killed invocation -- runsDir holds
+  // exactly the one report this recovery replay just wrote.
+  const reportFiles = (await readdir(p.runsDir)).filter((n) => n.startsWith('report-'));
+  assert.equal(reportFiles.length, 1);
+
+  const latest = await readLatestRecords(p.storeFile);
+  assert.equal(latest.length, 2, 'each ID appears exactly once in the latest view');
+});
+
+// --- Overlapping IDs across pages (valid content, different per page): last occurrence wins ---
+
+test('a valid ID repeated across two pages with different content: the later page wins, and counts explain the collapse', async (t) => {
+  const { origin, close } = await startServer({
+    '/data': (req, res) => {
+      const page = new URL(req.url, 'http://x').searchParams.get('page') ?? '1';
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (page === '1') {
+        res.end(JSON.stringify([
+          { id: 'A', link: 'https://example.test/a', title: 'A page1' },
+          { id: 'B', link: 'https://example.test/b', title: 'B' },
+        ]));
+      } else {
+        res.end(JSON.stringify([
+          { id: 'A', link: 'https://example.test/a', title: 'A page2' },
+          { id: 'C', link: 'https://example.test/c', title: 'C' },
+        ]));
+      }
+    },
+  });
+  t.after(close);
+
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { method: 'GET', pagination: { style: 'page-param', param: 'page', max_pages: 2, allow_truncation: true } },
+    records_path: '$',
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const { storeFile, runsDir } = await tempPaths(t);
+  const { report } = await runIngest({ adapter, paths: { storeFile, runsDir }, fetchImpl: fetch, now: new Date() });
+  assert.equal(report.stages.parsed, 4, 'both pages must be fully extracted before collapsing on id');
+  assert.equal(report.stages.fresh, 3, 'A collapses to one row -- 4 parsed records become 3 distinct IDs');
+  assert.equal(report.stages.written, 3);
+
+  const latest = await readLatestRecords(storeFile);
+  const a = latest.find((r) => r.fields.source_id === 'A');
+  assert.equal(a.fields.title, 'A page2', 'the later page occurrence must win');
+  assert.equal(latest.length, 3);
+});
+
+// --- Cancellation: no store mutation before append; committed status survives a late cancellation ---
+
+test('a caller abort during fetch produces no store mutation', async (t) => {
+  const { origin, close } = await startServer({
+    '/data': () => { /* never responds -- simulates a hang */ },
+  });
+  t.after(close);
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { method: 'GET', timeout_ms: 5000, retry: { max_attempts: 1 } },
+    records_path: '$',
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const { storeFile, runsDir } = await tempPaths(t);
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 50);
+  const start = Date.now();
+  let caught;
+  try {
+    await runIngest({ adapter, paths: { storeFile, runsDir }, fetchImpl: fetch, now: new Date(), signal: ac.signal });
+    assert.fail('expected the run to abort');
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(Date.now() - start < 2000, 'must not wait out the full 5s timeout once aborted');
+  assert.equal(caught.code, 'E_ABORTED');
+  assert.equal(caught.report.storage.status, 'not_started');
+  await assert.rejects(readFile(storeFile), { code: 'ENOENT' }, 'no store file must ever be created');
+});
+
+test('a caller abort during a Retry-After wait produces no store mutation', async (t) => {
+  const { origin, close } = await startServer({
+    '/data': (req, res) => {
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '5' });
+      res.end('{}');
+    },
+  });
+  t.after(close);
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { method: 'GET', max_duration_ms: 10_000, retry: { max_attempts: 2, backoff_ms: 0, max_delay_ms: 10_000 } },
+    records_path: '$',
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const { storeFile, runsDir } = await tempPaths(t);
+  const ac = new AbortController();
+  setTimeout(() => ac.abort(), 50);
+  const start = Date.now();
+  let caught;
+  try {
+    await runIngest({ adapter, paths: { storeFile, runsDir }, fetchImpl: fetch, now: new Date(), signal: ac.signal });
+    assert.fail('expected the run to abort');
+  } catch (err) {
+    caught = err;
+  }
+  assert.ok(Date.now() - start < 2000, 'must not wait out the full 5s Retry-After once aborted');
+  assert.equal(caught.code, 'E_ABORTED');
+  assert.equal(caught.report.storage.status, 'not_started');
+  await assert.rejects(readFile(storeFile), { code: 'ENOENT' });
+});
+
+test('cancellation that lands only after the store append already committed does not roll back or fail the run', async (t) => {
+  const items = [
+    { id: 1, link: 'https://example.test/1', title: 'One' },
+    { id: 2, link: 'https://example.test/2', title: 'Two' },
+  ];
+  const adapter = {
+    version: 1, host: 'example.test',
+    access: { tier: 0, kind: 'json-api', url: 'https://example.test/api' },
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const { storeFile, runsDir } = await tempPaths(t);
+  const ac = new AbortController();
+
+  const pollAndAbort = (async () => {
+    for (;;) {
+      try {
+        const s = await stat(storeFile);
+        if (s.size > 0) { ac.abort(); return; }
+      } catch { /* not yet created */ }
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  })();
+
+  const { report } = await runIngest({
+    adapter, paths: { storeFile, runsDir },
+    fetchImpl: async () => new Response(JSON.stringify(items), { status: 200 }),
+    now: new Date(), signal: ac.signal,
+  });
+  await pollAndAbort;
+  assert.equal(report.outcome, 'ok', 'a cancellation arriving after append must not turn a committed run into a failure');
+  assert.equal(report.stages.written, 2);
+  const stored = await readRecords(storeFile);
+  assert.equal(stored.length, 2);
 });

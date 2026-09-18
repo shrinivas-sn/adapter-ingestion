@@ -580,3 +580,89 @@ this task).
   prohibits running fixture scripts against real store paths as tests.
 
 **Deviations from plan:** None identified.
+
+## Task 10 — Prove real consumer and failure/replay scenarios
+
+**Date:** 2026-09-18
+**Revision:** `7433297` (Task 9 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `test/run.test.mjs` (+8 tests: E01, both recorded adapters — first-run fresh
+count, identical replay writes 0, one edited mapped field changes exactly 1 with the
+latest view still one row per ID, a broken required mapping reports a stale canary — each
+driven through a native `Response` with a logical `now` derived from the fixture's own
+newest mapped staleness value + 12h, never a disabled freshness check).
+`test/integration.test.mjs` (+8 tests: E02 mid-pagination retry exhaustion against a
+seeded store; E03 report-write failure + recovered replay using the real earthquake
+fixture; L01 orchestration-boundary completion — two real child processes running actual
+`runIngest` against a gated loopback endpoint; E04 a real killed child process leaving a
+synced valid line + corrupt partial tail; a valid cross-page ID-overlap test; three
+cancellation tests — abort during fetch, abort during a Retry-After wait, and a
+cancellation that lands only after the store append already committed).
+`test/helpers/store-worker.mjs` gained two new IPC commands: `run-ingest` (runs the real
+full `runIngest` orchestration in the child, not just `withStoreLock` directly — needed to
+prove the lock-then-fetch ordering at the orchestration boundary) and
+`hold-lock-partial-write` (writes one complete, synced record line plus a deliberately
+unterminated partial line while holding the lock, then hangs for the parent to kill).
+`test/helpers/fixtures.mjs` gained `loadAdapterFixture(host)` and
+`newestStalenessInstant(adapter, fixtureRoot)`, shared by both test files that needed real
+fixture replay. **No `src/*.mjs` production file was touched** — every new test passed
+against the existing Task 1–9 implementation on the first real run; no genuine defect was
+found.
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/run.test.mjs` | 0 | 21/21 (13 before this task; +8 new E01 tests, both adapters). | |
+| `node --test test/integration.test.mjs` | 0 | 28/28 (20 before this task, confirmed via `git stash`; +8 new). | |
+| `npm test` (full suite) | 0 | 269/269 (268 pass, 1 documented skip carried over from Task 8; 253 before this task + 16 new). | |
+| `node scripts/verify-store-scale.mjs` | 0 | Unaffected by this task; re-run to confirm — PASS, 100 unique IDs, heapUsedMb ≈17.3 under a 96 MiB V8 heap limit, rssMb ≈73.2, against a 256 MiB / 66,041-record disposable history. | |
+| `node scripts/run-earthquake-offline.mjs` (real, against this workspace's gitignored `store/`/`runs/` paths — not a temp dir, since the script itself hardcodes those paths and is out of Task 10's file list) | 0 | `{fetched:5, parsed:5, fresh:0, unchanged:5, written:0}`; canary `stale` — `staleness: newest occurred_at_epoch_ms is 21.6 days old, exceeds max_staleness_days 1`. **Correct, not a defect**: this script uses real wall-clock `now` (unlike E01's tests, which deliberately pin `now` to the fixture's own clock) against a fixture dated 2026-08-28 relative to today 2026-09-18 — the staleness canary firing for real, against real elapsed time, is exactly what it's supposed to do. `fresh:0/unchanged:5` shows the store already held these 5 records from a prior real run. | |
+| `node scripts/run-earthquake-broken.mjs` | 1 (by the script's own `process.exit(canary.status==='ok'?0:1)`) | `{fetched:5, parsed:0}`; canary `stale` — `min_records: parsed 0`, `required_field_ratio: 0/5 parsed`. Confirms the renamed-field (`properties.mag`→`properties.magnitude`) failure path executes for real, not just via `node --check`. | |
+
+**Scenario status:** E01, E02, E03, E04 — pass; L01 additionally proven at the
+runIngest-orchestration boundary (previously only the withStoreLock boundary); P03 and R03
+additionally reinforced at the full runIngest/store level (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- **E03 needed incremental mode, not this adapter's default snapshot mode, to isolate
+  `E_REPORT_WRITE` specifically.** Same split Task 9's O03 already documented: snapshot
+  mode's eligible-history scan reads `runsDir` *before* the final `writeReport` call, so
+  pointing `runsDir` at a regular file fails the scan first (`E_REPORT_READ`) — still a
+  faithful "committed storage survives a downstream report failure" proof, just not the
+  code the plan's representative snippet names. The real earthquake adapter was given a
+  throwaway `fetch.incremental` override (skips the eligible-history scan entirely) so the
+  *only* report.mjs filesystem call in the run is the final write, isolating
+  `E_REPORT_WRITE` as the plan's snippet expects.
+- **L01's orchestration-boundary gate lives at the HTTP layer, not a second IPC signal.**
+  The gated loopback server resolves a `requestReceived` promise the instant a request
+  lands, before awaiting its own release gate. Because `run.mjs`'s lock-then-fetch order
+  guarantees `fetchAll` is only ever called from inside `withStoreLock`'s callback, the
+  server observing a request is itself sufficient proof the owner already holds the lock —
+  no separate "locked" IPC message was needed the way `acquire-and-hold` uses one for the
+  withStoreLock-level L01 test. The contender is a second real forked process, not an
+  in-process call, so both sides of the race are genuine separate OS processes.
+- **E04 uses a synthetic 2-record adapter/item pair, not a recorded adapter.** Unlike E01
+  (which specifically requires real recorded adapters), E04 is proving store/lock crash
+  mechanics — the record content is incidental. `extractAll` is called once in the test to
+  produce the exact same `record.id`/`content_hash` shape `runIngest` itself would, so the
+  hand-written valid line and truncated partial line are byte-faithful to a real crash,
+  not approximated.
+- **The cancellation-after-append test polls the real filesystem, not a timer.** `run.mjs`
+  checks `signal.aborted` only once, immediately before `appendRecords` — there is no
+  recheck afterward. Rather than race a `setTimeout` against real disk I/O (flaky by
+  construction), the test polls `stat(storeFile)` until the file has real bytes on disk,
+  *then* aborts — a real, deterministic proof that a cancellation arriving after that
+  checkpoint cannot roll back or fail an already-committed run, without depending on
+  timing tolerances.
+- **`node --test` with no path argument is not the full-suite command** — it also treats
+  `test/helpers/store-worker.mjs` as its own suite (matched by living under a `test/`
+  directory) and fails it, since that file's top-level `process.send({event:'ready'})`
+  throws outside a real IPC channel. This is pre-existing (confirmed via `git stash`
+  against the Task 9 baseline, unrelated to this task) and is exactly why `package.json`'s
+  `test` script scopes to `"test/*.test.mjs"`; `npm test` remains the correct full-suite
+  command, not bare `node --test`.
+- Per the plan's explicit constraint, only test files were touched this task — no
+  `src/*.mjs` file needed a change, since every new real-boundary test passed against the
+  existing Task 1–9 implementation.
+
+**Deviations from plan:** None identified.

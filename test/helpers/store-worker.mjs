@@ -1,6 +1,6 @@
 // A child process driven by IPC messages, used to prove withStoreLock's
 // exclusion actually holds across real separate processes -- not just
-// concurrent promises inside one. Two commands:
+// concurrent promises inside one. Commands:
 //   { cmd: 'acquire-and-hold', storeFile, runId } -- acquires the lock,
 //     replies { event: 'locked' }, then waits for an explicit
 //     { cmd: 'release' } message before letting the callback return
@@ -11,6 +11,18 @@
 //   { cmd: 'acquire-once', storeFile, runId } -- a one-shot acquisition,
 //     replies { event: 'acquired' } or { event: 'error', code, message },
 //     then exits.
+//   { cmd: 'run-ingest', adapter, paths, now } -- runs the real, full
+//     runIngest orchestration (not just withStoreLock directly) in this
+//     process; replies { event: 'run-done', report, canary } or
+//     { event: 'run-error', code, message, report }, then exits. Used to
+//     prove lock/HTTP ordering at the runIngest boundary, not just lock.mjs.
+//   { cmd: 'hold-lock-partial-write', storeFile, runId, validLine,
+//     partialLine } -- acquires the lock directly (bypassing runIngest) and
+//     writes one complete, synced line followed by a deliberately
+//     unterminated partial line, then replies { event: 'partial_written' }
+//     and hangs forever -- the parent kills this process to simulate a
+//     crash mid-append while the lock is still held.
+import { open } from 'node:fs/promises';
 import { withStoreLock } from '../../src/lock.mjs';
 
 // send() is asynchronous -- calling process.exit() right after it, without
@@ -55,6 +67,34 @@ process.on('message', async (msg) => {
     } catch (err) {
       sendAndExit({ event: 'error', code: err.code, message: err.message });
     }
+    return;
+  }
+
+  if (msg.cmd === 'run-ingest') {
+    try {
+      const { runIngest } = await import('../../src/run.mjs');
+      const { report, canary } = await runIngest({
+        adapter: msg.adapter, paths: msg.paths, fetchImpl: fetch, now: new Date(msg.now),
+      });
+      sendAndExit({ event: 'run-done', report, canary });
+    } catch (err) {
+      sendAndExit({ event: 'run-error', code: err.code, message: err.message, report: err.report ?? null });
+    }
+    return;
+  }
+
+  if (msg.cmd === 'hold-lock-partial-write') {
+    try {
+      await withStoreLock(msg.storeFile, { runId: msg.runId }, async (canonicalStoreFile) => {
+        const handle = await open(canonicalStoreFile, 'a');
+        await handle.write(msg.validLine + '\n');
+        await handle.write(msg.partialLine); // deliberately no trailing newline
+        await handle.sync();
+        await handle.close();
+        process.send({ event: 'partial_written' });
+        await new Promise(() => {}); // hang -- the parent kills this process from here
+      });
+    } catch { /* unreachable in practice: the process is killed before this settles */ }
   }
 });
 

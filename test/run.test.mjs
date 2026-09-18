@@ -4,8 +4,10 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runIngest } from '../src/run.mjs';
-import { readRecords } from '../src/store.mjs';
+import { readRecords, readLatestRecords } from '../src/store.mjs';
 import { readHistory, writeReport } from '../src/report.mjs';
+import { getPath } from '../src/extract.mjs';
+import { loadAdapterFixture, newestStalenessInstant } from './helpers/fixtures.mjs';
 
 const adapter = {
   version: 1, host: 'example.test',
@@ -284,3 +286,79 @@ test('C01: ineligible history entries cannot drag the count_drop_ratio baseline 
   assert.match(canary.breaches.join(' '), /count_drop_ratio/);
   await rm(dir, { recursive: true, force: true });
 });
+
+// --- E01: real fixture replay for both recorded adapters, over native Response ---
+
+for (const host of ['earthquake.usgs.gov', 'www.karnatakacareers.org']) {
+  test(`E01 (${host}): a first run stores every fixture record fresh, with an ok canary`, async () => {
+    const { adapter, fixtureRoot } = await loadAdapterFixture(host);
+    const { dir, paths } = await tmpPaths();
+    const now = new Date(newestStalenessInstant(adapter, fixtureRoot) + 12 * 3600 * 1000);
+    const total = getPath(fixtureRoot, adapter.records_path ?? '$').length;
+    const { report, canary } = await runIngest({
+      adapter, paths, now,
+      fetchImpl: async () => new Response(JSON.stringify(fixtureRoot), { status: 200 }),
+    });
+    assert.equal(report.stages.fetched, total);
+    assert.equal(report.stages.fresh, total);
+    assert.equal(canary.status, 'ok');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test(`E01 (${host}): an identical replay writes 0 new records`, async () => {
+    const { adapter, fixtureRoot } = await loadAdapterFixture(host);
+    const { dir, paths } = await tmpPaths();
+    const now = new Date(newestStalenessInstant(adapter, fixtureRoot) + 12 * 3600 * 1000);
+    const impl = async () => new Response(JSON.stringify(fixtureRoot), { status: 200 });
+    await runIngest({ adapter, paths, now, fetchImpl: impl });
+    const { report } = await runIngest({ adapter, paths, now, fetchImpl: impl });
+    assert.equal(report.stages.written, 0);
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test(`E01 (${host}): editing one mapped field changes exactly 1 record; the latest view has one row per ID`, async () => {
+    const { adapter, fixtureRoot } = await loadAdapterFixture(host);
+    const { dir, paths } = await tmpPaths();
+    const now = new Date(newestStalenessInstant(adapter, fixtureRoot) + 12 * 3600 * 1000);
+    await runIngest({
+      adapter, paths, now,
+      fetchImpl: async () => new Response(JSON.stringify(fixtureRoot), { status: 200 }),
+    });
+
+    const editedRoot = structuredClone(fixtureRoot);
+    const items = getPath(editedRoot, adapter.records_path ?? '$');
+    const total = items.length;
+    // title is present in every recorded adapter's map and is never part of
+    // record identity (source_id/url), so editing it changes content_hash
+    // without touching which record it is.
+    const segs = adapter.map.title.path.split('.');
+    let cur = items[0];
+    for (const seg of segs.slice(0, -1)) cur = cur[seg];
+    cur[segs.at(-1)] = `${cur[segs.at(-1)]} (edited)`;
+
+    const { report } = await runIngest({
+      adapter, paths, now,
+      fetchImpl: async () => new Response(JSON.stringify(editedRoot), { status: 200 }),
+    });
+    assert.equal(report.stages.changed, 1);
+    assert.equal(report.stages.written, 1);
+
+    const latest = await readLatestRecords(paths.storeFile);
+    assert.equal(latest.length, total, 'the latest view must have exactly one row per ID, not one per revision');
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  test(`E01 (${host}): a broken required mapping reports a stale canary, not a silent success`, async () => {
+    const { adapter, fixtureRoot } = await loadAdapterFixture(host);
+    const { dir, paths } = await tmpPaths();
+    const now = new Date(newestStalenessInstant(adapter, fixtureRoot) + 12 * 3600 * 1000);
+    const broken = { ...adapter, map: { ...adapter.map, title: { ...adapter.map.title, path: 'nonexistent_field' } } };
+    const { report, canary } = await runIngest({
+      adapter: broken, paths, now,
+      fetchImpl: async () => new Response(JSON.stringify(fixtureRoot), { status: 200 }),
+    });
+    assert.equal(report.stages.parsed, 0);
+    assert.equal(canary.status, 'stale');
+    await rm(dir, { recursive: true, force: true });
+  });
+}
