@@ -45,7 +45,7 @@
     "test": "node --test \"test/*.test.mjs\"",
     "ingest": "node src/run.mjs",
     "changeset": "changeset",
-    "version": "changeset version",
+    "version": "changeset version && npm install --package-lock-only",
     "release": "changeset publish"
   },
   "devDependencies": {
