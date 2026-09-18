@@ -333,6 +333,74 @@ at `--max-old-space-size=96`). `test/store.test.mjs` extended with the full S01�
 
 **Deviations from plan:** None identified.
 
+## Task 8 — Add owned local locking and process-level proof
+
+**Date:** 2026-09-18
+**Revision:** `973022d` (Task 7 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** new `src/lock.mjs` (`withStoreLock(filePath, {runId}, callback)` — realpaths the
+parent directory after creating it, rejects a symlinked store file with `E_OPTIONS`; creates
+`<canonicalStoreFile>.lock` exclusively via `open(...,'wx')`, an existing lock is immediate
+`E_STORE_LOCKED`; writes `{version,run_id,pid,hostname,started_at}` metadata, cleaning up only
+the lock this invocation just created on an initialization failure; releases in a `finally`-
+equivalent flow that verifies `run_id` before unlinking, refusing to touch a lock it can't
+confirm it owns; a release failure never masks the callback's own thrown error, and a
+cleanup-only failure itself rejects `E_LOCK_RELEASE`); `src/store.mjs` re-exports
+`withStoreLock` per the plan's file map; new `test/helpers/store-worker.mjs` (an IPC-driven
+child for real cross-process proof, reused again in Task 10); new `test/lock.test.mjs`.
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/lock.test.mjs` | 0 | 13/13 (12 pass, 1 documented skip; file is new this task, no prior baseline). | The symlink-rejection test skips on this machine (Windows, no Developer Mode/admin) — `fs.symlink` itself rejects with `EPERM` before the code under test ever runs, empirically verified. |
+| `npm test` (full suite) | 0 | 231/231 (230 pass, 1 skip; 218 before this task + 13 new). | |
+| `node --check` on `src/lock.mjs`, `test/helpers/store-worker.mjs`, `test/lock.test.mjs` | 0 | Syntax valid. | |
+
+**Scenario status:** L01, L02 — pass (see TEST-MATRIX.md, including L01's documented scope:
+Promise/process-level proof at the `withStoreLock` boundary; the `runIngest`-orchestration
+boundary is Task 10's).
+
+**Notable implementation decisions:**
+- **A real, reproducible cross-process hang was found and fixed in the test helper, not in
+  production code.** `test/helpers/store-worker.mjs`'s original design left its top-level
+  `process.on('message', ...)` listener registered after finishing a command; a forked
+  child's IPC channel keeps the event loop alive for as long as that listener exists,
+  whether or not more messages are actually coming, so the worker never exited on its own
+  after a graceful `release` -- only `t.after`'s force-kill (which never fires for a process
+  that already looks exited-in-progress) or the OS eventually reaping it would have ended it.
+  Diagnosed by bisecting with throwaway, non-`node:test` probe scripts (the default TAP
+  reporter buffers a test's `console.log`/`stderr` until that test concludes, which is why
+  the hang wasn't visible through `node --test` output directly) down to a raw
+  `open('wx')`-only reproduction, which resolved instantly, isolating the actual cause to the
+  worker never calling `process.exit()`. Fixed by having the worker explicitly exit after
+  each one-shot command, waiting for `process.send`'s own completion callback first (`send()`
+  is asynchronous; exiting immediately after calling it risks the process dying before the
+  message actually reaches the parent -- a second, smaller correctness risk caught in the
+  same pass). Left ~17 already-orphaned `node.exe` processes across several earlier hung
+  runs; identified precisely by command line (`Get-CimInstance Win32_Process`) and killed
+  only those, verified by command line to belong to this debugging session and not to any of
+  the user's other running Node processes (a Next.js dev server, `codex.js`, `cua-repl.mjs`).
+- **No code from section 4.5's list fits "reject a symlink store file" exactly**, since it's
+  neither "lock already held" (`E_STORE_LOCKED`) nor a store-content write failure
+  (`E_STORE_WRITE`). Classified as `E_OPTIONS`, matching section 6.2's existing use of that
+  code for an invalid `storeFile`/`runsDir` path -- a symlinked store path is the same kind
+  of "this configuration can't be used," not a runtime contention or write failure.
+- **"Lock metadata mismatch" and "release failure" were both provable with real, portable
+  filesystem behavior** (overwriting/deleting the lock file out from under a still-running
+  callback) rather than the internal test seam the plan allows -- reserved that seam
+  (`__testHooks.afterCreateBeforeMetadata`, exported only for tests importing `src/lock.mjs`
+  directly, never read from adapter JSON) for the one case with no such portable equivalent:
+  a write failing in the narrow window between the lock file's exclusive creation and its
+  metadata actually landing.
+- The plan's IPC protocol note ("parent starts owner; child sends `locked`; parent starts
+  contender...") is implemented with the *contender* acquisition happening directly in the
+  parent test process rather than as a second forked child -- the exclusion being proved is
+  between the owner (a genuinely separate OS process) and any other caller, and the parent
+  process is exactly that; a second child would prove the same boundary with more moving
+  parts for no additional evidence.
+
+**Deviations from plan:** None identified.
+
 ## Task 4 — Enforce native body limits, timeouts, and safe failures
 
 **Date:** 2026-09-18

@@ -30,8 +30,8 @@ only — no scenario below is passed by plan inspection alone.
 | S02 | project | 7 | Corrupt-line handling | Bad lines warn; large line fails early; non-ENOENT failures are visible. | test/store.test.mjs | same as S01 | pass | |
 | S03 | project | 7 | Preflight/tail repair | Invalid batch writes zero; prior partial tail repair preserves old/new records. | test/store.test.mjs | same as S01 | pass | |
 | S04 | project | 7 | Bounded-memory scale proof | 256 MiB history, 100 IDs reduces under 96 MiB V8 heap; early break closes handle. | scripts/verify-store-scale.mjs | `node scripts/verify-store-scale.mjs` | pass | |
-| L01 | project | 8 | Concurrent lock ownership | Actual concurrent processes: one enters, contender fails before fetch/mutation. | TBD (Task 8, orchestration boundary completed Task 10) | TBD | unproven | |
-| L02 | project | 8 | Lock cleanup / crash recovery | Owned cleanup on success/error; crash leaves lock; only explicit recovery permits replay. | TBD (Task 8) | TBD | unproven | |
+| L01 | project | 8 | Concurrent lock ownership | Actual concurrent processes: one enters, contender fails before fetch/mutation. | test/lock.test.mjs | `node --test test/lock.test.mjs` | pass | Proven at the withStoreLock boundary (contender's callback never runs); the runIngest-orchestration boundary (a gated loopback endpoint) is Task 10's job. |
+| L02 | project | 8 | Lock cleanup / crash recovery | Owned cleanup on success/error; crash leaves lock; only explicit recovery permits replay. | test/lock.test.mjs | same as L01 | pass | |
 | O01 | project | 9 | Persisted vs returned canary agreement | Persisted and returned canary agree; terminal outcomes/counts accurate. | TBD (Task 9) | TBD | unproven | |
 | O02 | project | 9 | Report publication integrity | Same-now reports unique; atomic temp ignored; malformed history skipped, I/O surfaced. | TBD (Task 9) | TBD | unproven | |
 | O03 | project | 9 | Error precedence | Primary failure survives secondary report failure; committed storage remains visible. | TBD (Task 9) | TBD | unproven | |

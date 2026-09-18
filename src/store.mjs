@@ -1,6 +1,7 @@
 import { mkdir, open } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { IngestionError } from './errors.mjs';
+export { withStoreLock } from './lock.mjs';
 
 const CHUNK_BYTES = 64 * 1024;
 const LF = 0x0a;
