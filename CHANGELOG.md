@@ -1,5 +1,21 @@
 # @shrinivas-sn/adapter-ingestion
 
+## 0.2.0
+
+### Minor Changes
+
+- 55db8d0: Harden JSON ingestion with strict adapter and record validation, bounded fetches,
+  retries, explicit pagination completeness, local store locking, streaming history
+  reads, and final run reports. Require Node 22.15.0 or newer. See MIGRATION-0.2.md
+  for stricter configuration, fetch injection, pagination, and recovery behavior.
+
+### Patch Changes
+
+- 4997013: Fix the `text` normalizer deleting numeric HTML character references
+  (`&#8211;`, `&#038;`, `&#x...;`) instead of decoding them -- found
+  integrating a real WordPress source, where every title containing an en
+  dash or an ampersand was silently mangled.
+
 ## 0.1.0
 
 ### Minor Changes
