@@ -840,3 +840,87 @@ proves K03, and this is exactly why — a directory-vs-file assertion mistake th
 Windows session's `t.skip()` never exercised was caught the first time this test actually
 ran for real, on the platform it was written to prove something about. K03 is now `pass`
 in TEST-MATRIX.md, on real evidence, not local success.
+
+## Task 12 (partial) — review, version, and candidate verification; publish not yet authorized
+
+**Date:** 2026-09-18
+**Revision:** `36f6123` (PR #3 merge commit) → `55db8d0` (changeset) → `70c8e8d` on
+`changeset-release/main` (lockfile reconciliation, the actual 0.2.0 candidate)
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**What this covers:** the review/version/candidate-verification portion of Task 12's
+checklist. **Publication (the actual `npm publish`) has not happened and was not
+requested** — merging PR #2 is what triggers it, and that needs the user's own separate,
+explicit authorization per plan.md §9's Task 12 exit criteria and this repo's own standing
+note in STATUS.md. Everything below stops short of that action.
+
+**Sequence, as it actually happened:**
+1. PR #3 (Tasks 0–11, `release/0.2.0-reliability` → `main`) merged by explicit user request
+   (merge commit `36f6123`). This is the first real push of this branch to GitHub in this
+   project's history — confirmed beforehand via `git ls-remote --heads origin`, which
+   showed only `main` and `changeset-release/main`, neither containing any of this work.
+2. The merge push triggered `release.yml` for real (run `35375083532`): `validate` (full
+   CI matrix) passed, then `release` ran `npm install -g npm@11.19.1` (confirms the pinned
+   exact version actually installs, not just that the number exists on the registry),
+   `npm ci`, `npm test`, and `changesets/action`, which correctly found the one
+   already-pending patch changeset and updated the existing "Version Packages" PR (#2,
+   open since 2026-09-06) to `0.1.1` — it did **not** publish, since a changeset was still
+   pending, exactly as designed.
+3. Added `.changeset/reliability-release.md` (the exact minor-bump changeset plan.md §9
+   specifies), after an **isolated dry run** in a disposable `git clone` (not the working
+   repo): copied the new changeset in, ran `npm install` then the exact `npm run version`
+   command `release.yml` itself uses, and confirmed — before touching the real repo —
+   that (a) it computes `0.2.0` correctly (minor supersedes the pending patch, per semver),
+   (b) `CHANGELOG.md` combines both entries correctly, (c) there is no npm lifecycle-hook
+   collision (`npm run version` invokes the plain script named `"version"`; it is not the
+   `npm version` CLI subcommand and does not trigger `preversion`/`postversion` hooks).
+   Dry-run clone deleted after inspection, per plan.md's "delete only the owned temp
+   directory" instruction (this being the isolated-clone equivalent for a versioning dry
+   run, not `verify-package.mjs`'s own temp dir).
+4. Pushed the changeset to `main` directly (commit `55db8d0`) — matches this repo's own
+   established convention (regular commits go straight to `main`; only the large feature
+   branch used a PR, and only because the user asked to see CI run on it). Triggered
+   `release.yml` again (run `35375495347`): `validate` passed, `release` ran clean, and PR
+   #2 updated live to `0.2.0`, combining both changesets — confirmed by reading the PR's
+   generated body directly (`gh pr view 2`), not assumed.
+5. **Found the lockfile gap plan.md explicitly warns about**: `changeset version` (run
+   inside `release.yml`) touches `package.json`/`CHANGELOG.md`/`.changeset/*.md` only —
+   `package-lock.json`'s root `"version"` field was left at `0.1.0` on PR #2's branch while
+   `package.json` said `0.2.0`, the same class of mismatch reconciled in Task 11. Checked
+   out `changeset-release/main` locally, ran `npm install`, diffed dependency versions
+   explicitly (`added: []`, `removed: []`, `changed: []` — only the root version field
+   moved), pushed the fix directly onto PR #2's branch (commit `70c8e8d`).
+6. Ran the full suite and `scripts/verify-package.mjs` **on the actual 0.2.0 candidate
+   commit** (not a rehearsal): 281/281 pass; real pack of
+   `shrinivas-sn-adapter-ingestion-0.2.0.tgz`, 20 entries, `integrity: sha512-WFKRas8T3mKiN
+   LdC8kAEOwqpITplC4NWD+Xxr7ogaI16PpFK/+PauImEOAy0U3L8jA0NW6ROa3sxsIqEMBqQBw==`,
+   `shasum: 766fb48c1f13b98949dea41fb2ba3bbd37d6ee76`, all consumer checks pass. This is
+   Q01's evidence.
+7. Pushed the lockfile fix triggered `ci.yml`'s `pull_request:` trigger on PR #2 again
+   (run `35375776700`) — all 6 matrix cells green.
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `git ls-remote --heads origin` (before pushing PR #3) | 0 | Only `main`, `changeset-release/main` — confirmed this was genuinely the first push of the reliability branch. |
+| `gh pr merge 3 --merge --delete-branch=false` | 0 | Merged, commit `36f6123`. |
+| Isolated `npm run version` dry run (disposable clone, deleted after) | 0 | `0.2.0` computed correctly; `CHANGELOG.md` combined both entries; no lifecycle-hook collision. |
+| `node scripts/verify-package.mjs` on commit `70c8e8d` (the real 0.2.0 candidate) | 0 | PASS — see body above for the full manifest/integrity record. |
+| `npm test` on the same commit | 0 | 281/281 (279 pass, 2 documented skips). |
+| `gh pr checks 2` (PR #2, after the lockfile fix) | 0 | 6/6 pass. |
+| `npm view @shrinivas-sn/adapter-ingestion version dist-tags --json` | 0 | `{"version":"0.1.0","dist-tags":{"latest":"0.1.0"}}` — `0.2.0` confirmed still unused on the real registry. |
+
+**Not yet done, deliberately:**
+- **Verifying actual npmjs.com Trusted Publishing settings** (repository/workflow/
+  environment) — plan.md requires checking the *actual* configured settings, never
+  inferring them from `release.yml`'s YAML alone. There is no programmatic/CLI access to
+  npmjs.com's Trusted Publishing UI from this session; this check is recorded as **blocked**,
+  not silently skipped or assumed passing.
+- **The actual publish.** PR #2 merging is the action that triggers it (via
+  `changesets/action` → `changeset publish`, `id-token: write` trusted publishing, no
+  `NPM_TOKEN`). Not done — needs the user's own explicit authorization, separate from the
+  general implementation authorization already in effect. Q02 stays `blocked` until then.
+
+**Deviations from plan:** None identified in the portion completed. The remaining Task 12
+checklist items (independent review pass beyond this session's own inline review, actual
+publish, post-publish registry/provenance verification) are correctly left undone pending
+authorization, per plan.md's own exit criteria — not a gap in this entry.
