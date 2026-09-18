@@ -1,7 +1,7 @@
 import { mkdir, open, unlink, readFile, lstat, realpath } from 'node:fs/promises';
 import { dirname, basename, join } from 'node:path';
 import { hostname } from 'node:os';
-import { IngestionError, safeFailure } from './errors.mjs';
+import { IngestionError, safeFailure, addSecondaryError } from './errors.mjs';
 
 // Test-only injection point: lets a test force a failure in the narrow
 // window between the lock file's exclusive creation and its metadata write
@@ -119,10 +119,7 @@ export async function withStoreLock(filePath, { runId } = {}, callback) {
       // The primary failure is what the caller needs to see and act on;
       // the release failure rides along as a safe, bounded secondary detail
       // rather than replacing it.
-      if (callbackError instanceof IngestionError) {
-        callbackError.details = { ...(callbackError.details ?? {}), secondary_errors: [safeFailure(releaseErr, 'lock_release')] };
-      }
-      throw callbackError;
+      throw addSecondaryError(callbackError, safeFailure(releaseErr, 'lock_release'));
     }
     // Cleanup alone failed: a lock the caller believes is free is actually
     // still sitting on disk, which is itself a reportable failure, not a

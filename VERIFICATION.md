@@ -401,6 +401,116 @@ boundary is Task 10's).
 
 **Deviations from plan:** None identified.
 
+## Task 9 — Integrate the final lifecycle, reports, and canary baseline
+
+**Date:** 2026-09-18
+**Revision:** `a5fe3f4` (Task 8 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `src/canary.mjs` rewritten (`checkCanary(report, history, cfg, {now})` — a 4th
+options param for injectable, deterministic time; incremental mode skips
+min_records/count_drop_ratio/staleness with reason `incremental_batch`, and
+required_field_ratio with `empty_batch` when the incremental delta is empty; snapshot mode
+always evaluates min_records, including `[]`; a new `canary.skipped` array records every
+skip with its reason; staleness now parses via a dedicated `parseStalenessInstant` — strict
+date-only or explicit-zone ISO timestamp (reusing `isValidDateOnly` from normalize.mjs for
+the calendar check) or finite epoch milliseconds, rejecting a zone-less timestamp instead of
+guessing; a light defensive median filter excludes any given history entry whose own
+`outcome` says failed/stale, while still counting legacy entries with no `outcome` field at
+all). `src/report.mjs` rewritten (`buildReport` emits the full v2 schema — `report_version`,
+`run_id` defaulting to a real `randomUUID()`, `adapter_fingerprint`, `mode`, `outcome`,
+`failure`, `secondary_errors`, `warnings`/`warning_count`, capped `fetch`/`storage` blocks —
+with every new field defaulting sanely for a minimal standalone caller; `fatal_error`
+defaults to mirroring `failure.message` for compatibility, overridable explicitly;
+`writeReport` publishes via an exclusive uniquely-named temp sibling, sync, close, then
+rename, with the run_id embedded in the final filename so two reports at the identical
+`started_at` never collide; new `readEligibleHistory(dir, limit, isEligible)` scans
+newest-first and stops once enough eligible reports are found without loading every body;
+`readHistory` is now a thin wrapper over it with no filter). `src/run.mjs` rewritten
+end-to-end in the exact section 6.2 lifecycle order, wired to Task 8's `withStoreLock`.
+`src/errors.mjs` gained `addSecondaryError` (shared by `run.mjs` and a refactored
+`lock.mjs`, replacing lock.mjs's own inline duplicate of the same logic).
+`test/run.test.mjs`, `test/report.test.mjs`, `test/canary.test.mjs` extended; two existing
+`run.test.mjs` assertions updated (see below); `test/integration.test.mjs` unchanged this
+task (see scope note below).
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/run.test.mjs test/report.test.mjs test/canary.test.mjs` | 0 | 37/37 (15 before this task, confirmed via `git stash`; +22 new). | |
+| `node --test test/run.test.mjs test/report.test.mjs test/canary.test.mjs test/integration.test.mjs` | 0 | 57/57 (the 37 above + 20 unchanged `integration.test.mjs` transport tests, confirming no regression there). | |
+| `npm test` (full suite) | 0 | 253/253 (252 pass, 1 documented skip carried over from Task 8; 231 before this task + 22 new). | |
+| `node --check` on `src/run.mjs`, `src/report.mjs`, `src/canary.mjs`, `src/lock.mjs`, `src/errors.mjs` | 0 | Syntax valid. | |
+| `node scripts/verify-earthquake-adapter.mjs` (read-only; no `runIngest`/store/runs writes) | 0 | `validateAdapter` ok:true; `verifyAgainstFixtures` 5/5, ratio 1, `{}` field failures — extraction path unaffected by this task. | `scripts/run-earthquake-{offline,broken}.mjs` were re-`node --check`ed only, not executed, since both write into this workspace's real `store/`/`runs/` directories (same standing limitation recorded in Task 4's entry); Task 10 owns real fixture end-to-end execution (E01) in isolated temp paths. |
+
+**Scenario status:** O01, O02, O03, C01, C02 — pass (see TEST-MATRIX.md).
+
+**A real bug found and fixed while writing the O03 tests (not a pre-existing regression --
+introduced and caught within this same task):** `report.mjs`'s `writeReport` called
+`mkdir(dir, {recursive:true})` outside any try/catch. Forcing that specific call to fail
+(`runsDir` pointed at a regular file, an approach the plan's own Task 9 checklist names) threw
+a raw `EEXIST` `Error`, not an `IngestionError` -- `safeFailure` correctly refuses to trust an
+unrecognized error's own code/message, but its fallback for exactly that case assumes an
+unrecognized error can only be an arbitrary `fetchImpl` failure and labels it `E_FETCH`. The
+first O03 test's own assertion (secondary error must be `E_REPORT_WRITE`) caught this
+immediately. Fixed by wrapping the `mkdir` call and classifying it the same way every other
+fs call in this module already was.
+
+**Notable implementation decisions:**
+- **Two existing `run.test.mjs` assertions were updated, not weakened.** `fetch.retry:
+  {max_attempts: 1}` was added to the shared test adapter -- E_FETCH/E_TIMEOUT became
+  retryable by default in Task 6, and none of this file's tests are about retry behavior
+  (same pattern Task 6 already used elsewhere). The "run that throws" test's
+  `assert.match(history[0].fatal_error, /DNS lookup failed/)` was replaced with assertions on
+  `outcome`/`failure.code` and an explicit check that the raw message is *absent* from the
+  persisted JSON -- the old assertion depended on exactly the unsafe behavior section 4.5
+  requires removing (E_FETCH's message is always replaced in any safe projection); the
+  underlying in-memory thrown error still carries the raw message unchanged, which a separate
+  assertion in the same test still confirms.
+- **`test/integration.test.mjs` was deliberately left unchanged this task.** Its existing
+  scope is transport-only (`fetchAll` against real servers); a real-HTTP-server-plus-full-
+  `runIngest` proof would duplicate what Task 10 exists specifically to do end-to-end
+  (real fixtures, real concurrent processes, real crash-recovery), so Task 9's own coverage
+  stayed at the `runIngest`-with-fake-`fetchImpl` level already established in
+  `run.test.mjs`, consistent with that file's existing pattern.
+- **C01's test needed a genuine `adapter_fingerprint` value, not a guessed/duplicated hash
+  computation.** Rather than exporting `computeAdapterFingerprint` (an internal helper) purely
+  for test use, or re-implementing the same SHA-256-of-canonical-JSON formula a second time in
+  the test file (exactly the kind of duplication the fingerprint's own "one canonical
+  identity" purpose argues against), the test runs one real `runIngest` call first and reads
+  back its actual published `adapter_fingerprint`, then uses that real value when hand-seeding
+  the ineligible history entries that must be excluded from the median.
+- **The four ineligible seed reports in C01 are dated *after* the two real baseline runs**
+  (not before), specifically so a newest-first eligible-history scan encounters them *first*
+  and must correctly skip past them to reach the two real eligible entries. Dating them
+  earlier would have let the scan satisfy its `median_window` from the real entries alone,
+  never exercising the exclusion logic the test exists to prove.
+- **O03 needed two variants to isolate its two distinct report-handling failure points.**
+  Snapshot mode's eligible-history scan and the final `writeReport` call both read/write the
+  same `runsDir`, so pointing it at a blocked path fails at the *history scan* first
+  (`E_REPORT_READ`) for a snapshot run -- still a faithful proof of "committed storage
+  survives a downstream report failure," just not the specific `E_REPORT_WRITE` code. A
+  second, incremental-mode variant (which skips the eligible-history scan entirely, per
+  section 6.3) isolates the final-write failure specifically, proving `E_REPORT_WRITE` as
+  primary when no other error exists.
+- **A `withStoreLock`-release failure after an otherwise fully successful run** (section 5.2's
+  "attempt to update this run's report to error") is tested by having `fetchImpl` itself
+  overwrite the run's own lock file with a foreign `run_id` as a side effect -- `fetchImpl`
+  runs *inside* the held lock, making it the one available hook to simulate external
+  interference without an internal test seam. The already-published successful report is
+  republished in place (same `run_id`/filename) with `outcome: 'error'`, and the store file's
+  committed records are confirmed still present.
+- `checkCanary`'s `now` parameter and `parseStalenessInstant`'s explicit-zone-timestamp
+  regex are new; every other snapshot-mode check (min_records, required_field_ratio,
+  count_drop_ratio) keeps its pre-Task-9 arithmetic unchanged, confirmed by all 8 pre-existing
+  `canary.test.mjs` tests passing verbatim against the rewrite before any new tests were added.
+- `readHistory`'s pre-Task-9 "write-then-slice(1)" pattern in `run.mjs` is gone entirely: the
+  eligible-history scan now runs *before* the current report is published, so the current run
+  is never in the read results to begin with, removing the off-by-one class of bug the Task 6
+  regression test (`a real collapse is not masked by the median-window off-by-one`) exists to
+  guard against. That test passes unchanged against the new implementation.
+
+**Deviations from plan:** None identified.
+
 ## Task 4 — Enforce native body limits, timeouts, and safe failures
 
 **Date:** 2026-09-18

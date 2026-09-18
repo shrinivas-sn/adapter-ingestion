@@ -32,11 +32,11 @@ only — no scenario below is passed by plan inspection alone.
 | S04 | project | 7 | Bounded-memory scale proof | 256 MiB history, 100 IDs reduces under 96 MiB V8 heap; early break closes handle. | scripts/verify-store-scale.mjs | `node scripts/verify-store-scale.mjs` | pass | |
 | L01 | project | 8 | Concurrent lock ownership | Actual concurrent processes: one enters, contender fails before fetch/mutation. | test/lock.test.mjs | `node --test test/lock.test.mjs` | pass | Proven at the withStoreLock boundary (contender's callback never runs); the runIngest-orchestration boundary (a gated loopback endpoint) is Task 10's job. |
 | L02 | project | 8 | Lock cleanup / crash recovery | Owned cleanup on success/error; crash leaves lock; only explicit recovery permits replay. | test/lock.test.mjs | same as L01 | pass | |
-| O01 | project | 9 | Persisted vs returned canary agreement | Persisted and returned canary agree; terminal outcomes/counts accurate. | TBD (Task 9) | TBD | unproven | |
-| O02 | project | 9 | Report publication integrity | Same-now reports unique; atomic temp ignored; malformed history skipped, I/O surfaced. | TBD (Task 9) | TBD | unproven | |
-| O03 | project | 9 | Error precedence | Primary failure survives secondary report failure; committed storage remains visible. | TBD (Task 9) | TBD | unproven | |
-| C01 | project | 9 | Canary baseline integrity | Bad/legacy/incremental/different-adapter history cannot lower snapshot baseline. | TBD (Task 9) | TBD | unproven | |
-| C02 | project | 9 | Incremental/empty-delta canary | Empty delta skips specified checks; empty snapshot stale; now deterministic. | TBD (Task 9) | TBD | unproven | |
+| O01 | project | 9 | Persisted vs returned canary agreement | Persisted and returned canary agree; terminal outcomes/counts accurate. | test/run.test.mjs | `node --test test/run.test.mjs test/report.test.mjs test/canary.test.mjs test/integration.test.mjs` | pass | |
+| O02 | project | 9 | Report publication integrity | Same-now reports unique; atomic temp ignored; malformed history skipped, I/O surfaced. | test/report.test.mjs | same as O01 | pass | |
+| O03 | project | 9 | Error precedence | Primary failure survives secondary report failure; committed storage remains visible. | test/run.test.mjs | same as O01 | pass | |
+| C01 | project | 9 | Canary baseline integrity | Bad/legacy/incremental/different-adapter history cannot lower snapshot baseline. | test/run.test.mjs | same as O01 | pass | |
+| C02 | project | 9 | Incremental/empty-delta canary | Empty delta skips specified checks; empty snapshot stale; now deterministic. | test/canary.test.mjs | same as O01 | pass | |
 | E01 | project | 10 | Fixture end-to-end | Both fixtures: first/replay/edit/broken mapping/historical clock exercised end to end. | TBD (Task 10) | TBD | unproven | |
 | E02 | project | 10 | Mid-pagination failure | Page 2 failure yields zero appends and honest progress/error report. | TBD (Task 10) | TBD | unproven | |
 | E03 | project | 10 | Report-write failure replay | Report fails after append; unchanged replay adds zero duplicates. | TBD (Task 10) | TBD | unproven | |

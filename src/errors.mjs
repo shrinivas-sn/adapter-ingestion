@@ -32,3 +32,15 @@ export function safeFailure(error, stage) {
   if (isIngestion && error.details !== undefined) out.details = error.details;
   return out;
 }
+
+// Appends a safe secondary-failure projection onto an IngestionError without
+// ever replacing its own code/message/details -- used wherever a cleanup or
+// report-write step fails alongside (never instead of) the error that
+// actually caused the run to fail. A plain non-IngestionError primary error
+// is returned unchanged: there's no safe, typed place to attach the detail.
+export function addSecondaryError(error, secondaryFailure) {
+  if (!(error instanceof IngestionError)) return error;
+  const existing = error.details?.secondary_errors ?? [];
+  error.details = { ...(error.details ?? {}), secondary_errors: [...existing, secondaryFailure] };
+  return error;
+}
