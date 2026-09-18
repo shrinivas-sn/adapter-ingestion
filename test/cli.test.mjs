@@ -235,5 +235,13 @@ test('CLI: SIGINT aborts gracefully mid-fetch -- exit 1 (not 0/2), no store muta
 
   assert.equal(result.code, 1, 'an aborted run is exit 1 (operational), not 0 or 2');
   assert.match(result.stderr, /ingest failed/);
-  assert.equal(await pathExists(join(cwd, 'store')), false, 'an abort mid-fetch must never mutate the store');
+  // withStoreLock legitimately creates store/ (and a .lock file inside it)
+  // while *acquiring* the lock -- before fetchAll is ever called -- so the
+  // directory existing is not itself store mutation. What must never exist
+  // is the store *file* itself (no record data was ever appended), and the
+  // lock must have been released cleanly on the way out (not left behind).
+  assert.equal(await pathExists(join(cwd, 'store', '127.0.0.1.jsonl')), false,
+    'an abort mid-fetch must never write any record data to the store file');
+  assert.equal(await pathExists(join(cwd, 'store', '127.0.0.1.jsonl.lock')), false,
+    'the lock must be released cleanly on an aborted run, not left behind');
 });
