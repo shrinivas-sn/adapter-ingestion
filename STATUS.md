@@ -1,73 +1,56 @@
 # Project status
 
-As of 2026-09-18. `main` is at `55db8d0` (PR #3 merged, reliability-release changeset
-added). The real 0.2.0 candidate is verified on PR #2
-(https://github.com/shrinivas-sn/adapter-ingestion/pull/2, `changeset-release/main` @
-`70c8e8d`) — CI green, package verified — but **not published**.
+**`@shrinivas-sn/adapter-ingestion@0.2.0` is published and live on npm**, as of
+2026-09-18. `main` is at `face358` (PR #2 merge — the real version-bump commit).
+Registry-confirmed: `dist-tags.latest: "0.2.0"`. Full plan.md release (Tasks 0–12) complete.
 
 ## Next up (start here)
 
-**Publishing 0.2.0 needs the user's own explicit authorization, separate from everything
-done so far.** Merging PR #2 is the action that triggers the real `npm publish` (via
-`changesets/action` → trusted publishing, no token). Nothing in this session's standing
-authorization covers that — do not merge PR #2 without being asked.
+Nothing blocking. The 0.2.0 release is done, published, and verified against the real
+registry-installed package (not just local success). Natural next steps, none urgent:
 
-Once authorized:
-1. Merge PR #2. `release.yml` re-runs `validate` (full matrix) then `release`; with no
-   pending changesets left, `changeset publish` actually runs this time.
-2. Investigate any publish failure from real logs — don't fall back to manual
-   `npm login`/`npm publish` unless the documented OIDC-404 failure mode (README's
-   "Publishing" section) actually recurs.
-3. After success: query `npm view @shrinivas-sn/adapter-ingestion version dist-tags --json`,
-   inspect published metadata/provenance, install the exact published version into a fresh
-   disposable consumer, repeat the smoke flow, compare files/version/integrity against the
-   candidate recorded in VERIFICATION.md. Record Q02.
-4. Update STATUS.md with the published version/commit/verification links only after that
-   succeeds.
+- If the repo ever gains a second collaborator with write access, revisit npm's
+  "staged-publish-only" option for the Trusted Publisher (currently set to allow direct
+  publish, an explicit, informed choice while this repo is single-maintainer — see
+  VERIFICATION.md's Task 12 completion entry for the tradeoff as discussed).
+- Provenance attestation isn't attached to this release (trusted publishing via OIDC alone
+  doesn't add it automatically; would need `npm publish --provenance` wired into the
+  release script). Optional future hardening, not a gap in what shipped.
+- plan.md's deferred-roadmap table (§11) has real future decision triggers (RSS/XML, URL
+  templates, cursor pagination, POST/GraphQL/auth) — none scheduled, no evidence yet to act on.
 
 ## Current state
 
-- **PR #3** (Tasks 0–11, `release/0.2.0-reliability` → `main`) merged by explicit user
-  request (`36f6123`). First real push of this branch — confirmed via `git ls-remote`
-  beforehand that neither `main` nor any other remote branch had any of this work yet.
-- The merge triggered `release.yml` for real: `validate` (full CI matrix) passed, `release`
-  installed the pinned `npm@11.19.1` and ran `changesets/action`, which correctly updated
-  the pre-existing "Version Packages" PR without publishing (a changeset was still
-  pending) — exactly as designed.
-- **Task 12 (in progress, review/version/candidate steps only):** added
-  `.changeset/reliability-release.md` (plan.md's exact minor-bump text), verified via an
-  isolated `git clone` dry run first (computes `0.2.0` correctly, no npm lifecycle-hook
-  collision, deleted after inspection) before touching the real repo. Pushed to `main`
-  (`55db8d0`); PR #2 now correctly shows `0.2.0`, combining this and the pre-existing patch
-  changeset.
-- **Found and fixed the same lockfile-reconciliation gap Task 11 already fixed once**:
-  `changeset version` doesn't touch `package-lock.json`, so PR #2's branch had
-  `package.json` at 0.2.0 but the lockfile root still at 0.1.0. Fixed directly on PR #2's
-  branch (`70c8e8d`) via a real `npm install`, dependency diff confirmed empty
-  (`added/removed/changed: []`).
-- **Q01 evidence real and recorded**: `scripts/verify-package.mjs` run against the actual
-  0.2.0 candidate commit — PASS, tarball `shrinivas-sn-adapter-ingestion-0.2.0.tgz`, 20
-  entries, integrity/shasum recorded in VERIFICATION.md. Full suite 281/281 on the same
-  commit. PR #2's own CI: 6/6 green.
-- **Not done, deliberately**: verifying actual npmjs.com Trusted Publishing settings
-  (blocked — no programmatic access to that UI from this session, not inferred from YAML);
-  the actual publish (blocked on explicit authorization, see "Next up").
-- Registry check: `npm view @shrinivas-sn/adapter-ingestion` still shows `0.1.0` as latest
-  — `0.2.0` confirmed unused, nothing published yet.
-- Full suite: 281/281 (279 pass, 2 documented platform-limitation skips), unchanged since
-  Task 11 — no source code changed in Task 12's work so far, only `.changeset/`/
-  `package.json`/`package-lock.json`/`CHANGELOG.md` (all Changesets-owned) plus this
-  session's own lockfile fix.
-- Standing authorizations: implementation work on `release/0.2.0-reliability`/`main`, one
-  commit/task, execute inline without delegation — still in effect. Extended this session,
-  by explicit request, to cover opening PR #3 and merging it. **Does not extend to merging
-  PR #2 or any real publish action** — those need their own explicit go-ahead.
+- **Published version:** `0.2.0`. **Commit:** `face358` on `main`.
+  **Verification:** `VERIFICATION.md`'s "Task 12 completion" entry — registry metadata
+  queried directly (not CLI-cached), fresh install from the real registry into a new
+  disposable consumer, full smoke flow (first/replay/edit/broken-mapping/filter) passed
+  against the actual published package, not `npm pack` or this repo's `src/`.
+- **The publish needed two real troubleshooting rounds**, both from actual logs/docs, both
+  resolved by the user's own explicit npm-account decisions: (1) no Trusted Publisher was
+  configured at all (404) — user added one with the exact fields verified against npm's own
+  docs; (2) npm defaults a new Trusted Publisher to staged-publish-only (403) — user
+  explicitly weighed the tradeoff (matters once there's a second collaborator with write
+  access; doesn't yet) and enabled direct publish. Full account in VERIFICATION.md.
+- **Found and fixed a second real bug during this process** (same class as the CI-caught
+  one in Task 11, found the same way — by actually running the real automation, not
+  assuming it): `changesets/action` regenerates (force-pushes) the release PR branch from
+  scratch on *every* push to `main`, not just changeset changes — silently discarding a
+  manual `package-lock.json` fix pushed there directly. Fixed at the source
+  (`package.json`'s `"version"` script now also runs `npm install --package-lock-only`, so
+  every future release self-heals the lockfile automatically), not re-patched by hand.
+- Tasks 0–12 all complete. Full per-task detail: `VERIFICATION.md`. Every TEST-MATRIX.md
+  scenario Tasks 1–12 own is `pass` (K01–K03, Q01–Q02 included, all on real evidence — CI
+  runs, registry queries, fresh installs — not local-only success).
+- Full suite: 281/281 (279 pass, 2 documented platform-limitation skips) on the published
+  commit.
+- Standing authorizations: implementation work — in effect throughout. Extended this
+  session, by explicit user request at each step, to cover: opening PR #3, merging PR #3,
+  merging PR #2, and the actual `npm publish`. Nothing was pushed, merged, or published
+  without that explicit request immediately preceding it.
 
 ## Pending
 
-- PR #2 (`Version Packages`, → `0.2.0`) is open, green, verified, and ready — merging it
-  is what actually publishes. Waiting on explicit authorization.
-- After publish: post-publish registry/provenance verification (Q02) and final STATUS.md
-  update with the real published version/commit.
+Nothing. This release cycle is closed.
 
 Release spec: `plan.md`. Full scenario ledger: `TEST-MATRIX.md`. Command evidence: `VERIFICATION.md`.

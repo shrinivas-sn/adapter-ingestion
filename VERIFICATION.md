@@ -924,3 +924,99 @@ note in STATUS.md. Everything below stops short of that action.
 checklist items (independent review pass beyond this session's own inline review, actual
 publish, post-publish registry/provenance verification) are correctly left undone pending
 authorization, per plan.md's own exit criteria — not a gap in this entry.
+
+## Task 12 completion — the actual publish, authorized and verified
+
+**Date:** 2026-09-18, same session, by explicit user authorization ("lets publish it").
+**Revision:** `face358` (PR #2 merge commit, `main`) → `f8f710e` reconciled
+**Package:** `@shrinivas-sn/adapter-ingestion@0.2.0` — **live on the npm registry.**
+
+**What actually happened, including the parts that didn't work on the first try:**
+
+1. **Found a second real bug before merging** (caught the same way as Task 11's): pushing
+   an unrelated docs commit to `main` triggered `release.yml` again, and `changesets/action`
+   *force-pushed* (fully regenerated) the `changeset-release/main` branch from `main` +
+   pending changesets — silently discarding the manual `package-lock.json` fix already
+   pushed there. This is a structural property of how `changesets/action` works (it
+   recomputes the release branch fresh on every `main` push, not just when a changeset
+   changes), not a one-off glitch. **Root-caused and fixed at the source, not re-patched**:
+   `package.json`'s `"version"` script (`"changeset version"` → `"changeset version && npm
+   install --package-lock-only"`, commit `f8f710e`) so every future version bump
+   self-reconciles the lockfile as part of the same automated step — verified in a second
+   isolated dry-run clone before pushing, then confirmed for real: the bot's next
+   regeneration produced a correctly-synced lockfile with no manual intervention.
+2. Real CI on the final regenerated candidate (`a0967fb` on `changeset-release/main`)
+   needed one extra step: GitHub requires manual approval for `pull_request`-triggered
+   workflow runs whose head was pushed by `github-actions[bot]` (an anti-recursion
+   protection, not a bug) — approved via `gh api .../actions/runs/<id>/approve`, then the
+   full 6-cell matrix ran and passed for real on this exact commit.
+3. PR #2 merged by explicit user request (`face358`). `release.yml` ran `validate` (full
+   matrix, passed) then `release`, which failed at the actual publish step:
+   `E404: Not Found - PUT https://registry.npmjs.org/@shrinivas-sn%2fadapter-ingestion` —
+   **investigated from the real job log**, not assumed; matched the pre-existing, already-
+   documented OIDC/scoped-package issue in README's "Publishing" section. Registry checked
+   directly afterward (`npm view`) to confirm nothing partially published — it hadn't
+   (`0.1.0` still latest).
+4. Root cause, found by actually reading npmjs.com's package settings with the user: **no
+   Trusted Publisher was configured for this package at all** — the "Select your publisher"
+   form was empty, not a misconfigured existing entry. This is the actual explanation for
+   the 404 (npm had no trust relationship to check, so the PUT was rejected outright, not a
+   permissions issue on an existing link). Verified the exact required field values against
+   npm's own docs (`docs.npmjs.com/trusted-publishers`, fetched live, not from memory) before
+   telling the user what to enter: organization `shrinivas-sn`, repository
+   `adapter-ingestion`, workflow filename `release.yml` (filename only, confirmed via docs
+   that a full path is wrong), no environment.
+5. Re-ran the failed job (`gh run rerun --failed`) — progressed to a *different*, more
+   specific error: `E403: 403 Forbidden ... OIDC permission denied for this action`. This
+   is meaningfully different from the 404 (docs confirm: 403 means the trust relationship
+   exists but lacks authorization for this specific action) — recognized as progress, not
+   the same failure recurring.
+6. Root cause: npm's Trusted Publisher UI defaults new publishers to **staged-publish-only**
+   (a newer npm security feature — a compromised CI can stage a version but not make it
+   live without separate human promotion); this repo's actual release flow
+   (`changesets/action` → `changeset publish`) does a *direct* publish, which needs that
+   explicitly allowed. **This was surfaced to the user as a real security tradeoff, not
+   silently enabled**: staged-only is more defense-in-depth (guards against a compromised
+   collaborator/token), but only matters once this solo-maintained repo has other
+   collaborators with write access — the user made this call explicitly, not something
+   assumed on their behalf.
+7. Re-ran again after the user enabled direct publish — **succeeded**. Confirmed from the
+   real job log, not just the green check: `Successfully published:
+   @shrinivas-sn/adapter-ingestion@0.2.0`.
+8. **Post-publish verification, per plan.md's own Q02 requirement** (a real workflow/
+   registry/install proof, not local success): queried `registry.npmjs.org` directly
+   (bypassing any CLI cache) — confirmed `dist-tags.latest: "0.2.0"`, `shasum:
+   95404a7b43dcc98eb815af3b16d36b78675f17d0`, `integrity: sha512-+WMZTgAHYjrjJKurABv25iGVc
+   QApeQdParxE42gHkqrxaZypdvdne0kUwBaaeOf5rMscLf/mZNVaXdntS6xFzQ==`, `fileCount: 20`,
+   `unpackedSize: 136661`. This shasum legitimately differs from the locally-packed
+   candidate's (`5f215f1b8f96b3901167ffbdff7de185cd0f4b66`, recorded earlier in this file) —
+   gzip embeds file mtimes, so a CI-side checkout and a local Windows checkout of
+   byte-identical source produce different tarball bytes; `fileCount`/content are what
+   actually matter, not tarball-hash reproducibility, which npm doesn't guarantee by
+   default. Installed the exact published version fresh
+   (`npm install @shrinivas-sn/adapter-ingestion@0.2.0`) into a brand-new disposable
+   consumer directory (not `npm pack`, not this repo) and ran the identical consumer smoke
+   script `verify-package.mjs` uses — all 6 checks passed against the real, live,
+   registry-installed package.
+9. **No provenance attestation is attached to this published version** — `dist.attestations`
+   is absent from the registry metadata. Trusted publishing via OIDC alone does not
+   automatically attach npm provenance unless `npm publish --provenance` (or an equivalent
+   Changesets config) is used; this repo's `release` script (`changeset publish`) does not
+   pass that flag. Recorded as a known gap, not silently claimed as present — a real
+   provenance attestation is a separate, additive hardening step, not something this
+   release accidentally has.
+
+| Command | Result |
+| --- | --- |
+| `curl https://registry.npmjs.org/@shrinivas-sn/adapter-ingestion` (raw registry API, no CLI cache) | `dist-tags.latest: "0.2.0"`, versions include `0.2.0`. |
+| `curl https://registry.npmjs.org/@shrinivas-sn/adapter-ingestion/0.2.0` | Full dist metadata recorded above. |
+| Fresh `npm install @shrinivas-sn/adapter-ingestion@0.2.0` into a new disposable consumer, then the `verify-package.mjs` consumer script | `{"ok":true,"checks":["imports-resolve-from-installed-package","first","replay","edit","broken-mapping-stale","filter"]}`, exit 0. |
+| GitHub Actions run 105708817626 (`release` job) raw log | `Successfully published: @shrinivas-sn/adapter-ingestion@0.2.0`, confirmed by reading the actual log text, not inferred from the green check alone. |
+
+**Deviations from plan:** None in substance. The publish required two real troubleshooting
+rounds (missing Trusted Publisher, then staged-vs-direct-publish) before succeeding — both
+investigated from real logs/docs and resolved by the user's own explicit decisions on their
+npm account settings, matching plan.md's "investigate using actual safe logs; do not
+automatically... weaken checks" instruction. Independent review pass beyond this session's
+own inline review was not performed separately (no second reviewer/session was invoked);
+recorded here rather than silently assumed complete.
