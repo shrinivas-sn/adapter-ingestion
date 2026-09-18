@@ -21,7 +21,7 @@ const items = [
   { id: 1, link: 'https://example.test/1', title: 'One' },
   { id: 2, link: 'https://example.test/2', title: 'Two' },
 ];
-const impl = (body) => async () => ({ ok: true, status: 200, json: async () => body });
+const impl = (body) => async () => new Response(JSON.stringify(body), { status: 200 });
 
 async function tmpPaths() {
   const dir = await mkdtemp(join(tmpdir(), 'run-'));

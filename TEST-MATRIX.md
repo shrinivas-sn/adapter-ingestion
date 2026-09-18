@@ -16,10 +16,10 @@ only — no scenario below is passed by plan inspection alone.
 | N02 | project | 2 | Date/time correctness | Leap/date/time checks and written-date timezone behavior; finite number compatibility. | test/normalize.test.mjs | same as N01 | pass | |
 | X01 | project | 2 | Mixed valid/invalid records | Mixed records retain valid rows with bounded actionable rejection samples. | test/extract.test.mjs | same as N01 | pass | |
 | F01 | project | 3 | Filter validation | Invalid filter rejected even on []; existing missing/array/empty semantics preserved. | test/filter.test.mjs | `node --test test/filter.test.mjs` | pass | |
-| H01 | project | 4 | Byte cap without Content-Length | Native chunked response without Content-Length is stopped by actual-byte cap. | TBD (Task 4) | TBD | unproven | |
-| H02 | project | 4 | Decoded/total/record limits | Decoded compressed/total-byte/record limits enforced before excess retention. | TBD (Task 4, cumulative-retry part completed Task 6) | TBD | unproven | |
-| H03 | project | 4 | Stall/timeout/abort cleanup | Native header/body stalls terminate via timeout/deadline/abort and release resources. | TBD (Task 4) | TBD | unproven | |
-| H04 | project | 4 | Safe error projection | JSON/path/redirect errors safe; supplied secret absent from reports/CLI. | TBD (Task 4) | TBD | unproven | |
+| H01 | project | 4 | Byte cap without Content-Length | Native chunked response without Content-Length is stopped by actual-byte cap. | test/integration.test.mjs | `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | pass | |
+| H02 | project | 4 | Decoded/total/record limits | Decoded compressed/total-byte/record limits enforced before excess retention. | test/integration.test.mjs, test/fetch.test.mjs | same as H01 | pass | Cumulative-across-retries evidence (vs. across-pages, proved here) is completed in Task 6. |
+| H03 | project | 4 | Stall/timeout/abort cleanup | Native header/body stalls terminate via timeout/deadline/abort and release resources. | test/integration.test.mjs | same as H01 | pass | |
+| H04 | project | 4 | Safe error projection | JSON/path/redirect errors safe; supplied secret absent from reports/CLI. | test/integration.test.mjs, test/fetch.test.mjs | same as H01 | pass | |
 | P01 | project | 5 | Unknown page size termination | Omitted per_page continues until []; known short-page/single-page cases correct. | TBD (Task 5) | TBD | unproven | |
 | P02 | project | 5 | Explicit truncation | Cap default fails with zero writes; explicit bounded window preserves complete:false. | TBD (Task 5) | TBD | unproven | |
 | P03 | project | 5 | Repeat-page detection | Repeated page fails; normal overlapping IDs still dedupe last wins. | TBD (Task 5) | TBD | unproven | |

@@ -5,13 +5,14 @@ As of 2026-09-18. Current code baseline: `179e5f4` (docs commit). Execution bran
 
 ## Next up (start here)
 
-**Tasks 0–3 are complete.** Read [plan.md](plan.md) Task 4, then execute it: create
-`src/http.mjs` and `test/helpers/http-server.mjs` (real loopback HTTP server); modify
-`src/fetch.mjs` to enforce actual byte/timeout/deadline limits via native Fetch, and convert
-existing Response test doubles to native `Response`. Start with the "actual bytes are
-limited without Content-Length" regression test in plan.md Task 4. This is the first task
-touching real network I/O — heavier than Tasks 0-3. Work sequentially through Tasks 4–12,
-one commit per completed task on `release/0.2.0-reliability`.
+**Tasks 0–4 are complete.** Read [plan.md](plan.md) Task 5, then execute it: fix pagination
+completeness/truncation semantics in `src/fetch.mjs` (section 4.3 — explicit
+`complete`/`stop_reason`, `allow_truncation`, repeated-batch detection via `E_PAGINATION_REPEAT`),
+update `adapters/www.karnatakacareers.org.adapter.json` to add `allow_truncation: true`
+(its `max_pages: 5` intentionally defines a bounded window). Start with the
+omitted-`per_page`-continues-until-empty regression test in plan.md Task 5. Work
+sequentially through Tasks 5–12, one commit per completed task on
+`release/0.2.0-reliability`.
 
 ## Current state
 
@@ -41,11 +42,19 @@ one commit per completed task on `release/0.2.0-reliability`.
   `evaluateRule` validates its own rule when called directly; both reject an invalid `now`
   as `E_OPTIONS`. Matching semantics (10 operators, array-intersection, missing-field
   pass/fail table) unchanged. 153/153 full suite passes (132 + 21 new). F01 proved.
+- Task 4 changes: new `src/http.mjs` (`readJsonBody` — actual-byte-counted reads, per-page
+  and cross-page `max_total_bytes` budget), `src/errors.mjs` gained `safeFailure`;
+  `src/fetch.mjs` rewritten (redirect:'error', combined caller+timeout abort signal,
+  `max_duration_ms` deadline, no full URL in any message — fixes B14); new
+  `test/helpers/http-server.mjs` (real loopback server) and `test/integration.test.mjs`
+  (real chunked/gzip/stall/redirect/secret-leak proofs); all hand-rolled Response fakes in
+  fetch/run tests and both run-earthquake scripts converted to native `Response`. Retries
+  still disabled (Task 6). 170/170 full suite passes (153 + 17 new). H01–H04 proved.
 
 ## Pending
 
-- Implementation tasks **4–12** and 30 of 38 scenario proofs remain pending (V01–V04, N01,
-  N02, X01, F01 proved; see TEST-MATRIX.md).
+- Implementation tasks **5–12** and 26 of 38 scenario proofs remain pending (V01–V04, N01,
+  N02, X01, F01, H01–H04 proved; see TEST-MATRIX.md).
 - Key defects: pagination cutoff, mandatory identity, actual response limits, invalid entities/dates/config/filters, whole-file store reads, missing run exclusion, and incomplete saved reports.
 - package-lock.json root metadata is **0.0.0**, while package.json is **0.1.0**. Task 11 reconciles metadata; do not mass-update dependencies.
 - Current CI only tests Ubuntu / Node 24. Planned support proof covers Linux and Windows with Node 22.15.0, 22, and 24.

@@ -142,3 +142,73 @@ reuse, no new package subpath); `test/filter.test.mjs` extended.
   interface; the rule sets here are small enough that this costs nothing measurable.
 
 **Deviations from plan:** None identified.
+
+## Task 4 — Enforce native body limits, timeouts, and safe failures
+
+**Date:** 2026-09-18
+**Revision:** `870accc` (Task 3 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** new `src/http.mjs` (`readJsonBody` — actual-byte-counted body reading with a
+per-response `maxResponseBytes` cap and a cross-page/attempt `budget` object for
+`max_total_bytes`); new `test/helpers/http-server.mjs` (real loopback `node:http` server,
+routes by pathname, tracks/destroys sockets on close); `src/errors.mjs` (`safeFailure` —
+error-code-aware safe projection; `E_FETCH`'s message is always replaced since it can embed
+text from an arbitrary injected `fetchImpl`, every other code is self-authored and passes
+through); `src/fetch.mjs` rewritten (redirect:'error', combined caller+per-attempt abort
+signal via `AbortSignal.any`, `max_duration_ms` deadline checked before/after body parse,
+`max_records` checked before an unbounded spread, no full URL ever embedded in a message —
+only `.details.fetch.origin`); converted every hand-rolled `{ok,status,json}` fake to native
+`Response`/real sockets in `test/fetch.test.mjs`, `test/run.test.mjs`,
+`scripts/run-earthquake-{offline,broken}.mjs`; new `test/integration.test.mjs` (transport
+portion — real chunked/gzip/stall/redirect/malformed-JSON/secret-leak proofs).
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | 0 | 32/32 pass (15 before this task across fetch+run, confirmed via `git stash`; +17 new, 11 of them in the new integration.test.mjs). | |
+| `npm test` (full suite) | 0 | 170/170 pass (153 before + 17 new). | |
+| `node --check` on every new/modified source file | 0 | Syntax valid. | |
+
+**Scenario status:** H01, H02 (pages/attempts portion), H03, H04 — pass (see TEST-MATRIX.md).
+H02's cumulative-across-*retries* evidence and H03's retry-specific pacing remain Task 6's
+responsibility (retries are still disabled — one attempt per page, as the plan requires for
+this task).
+
+**Notable implementation decisions:**
+- Empirically verified (via a throwaway probe script against this task's own
+  `test/helpers/http-server.mjs`, not committed) the exact error shapes Node 22.15's native
+  fetch throws, rather than guessing: `AbortSignal.timeout` firing names its error
+  `TimeoutError` (`err.name`) even when wrapped in `AbortSignal.any([...])`; a manual
+  `AbortController.abort()` names it `AbortError`; `redirect:'error'` rejects with a
+  `TypeError` whose `.cause.message` is exactly `'unexpected redirect'`. `classifyFetchError`
+  in fetch.mjs is built directly on these observed shapes.
+- Fixed a real bug found while testing the mid-body-stall case: a stall *after* headers are
+  already sent aborts inside `readJsonBody`'s stream read, which previously let the raw
+  `TimeoutError`/`AbortError` escape unclassified past fetch.mjs's `catch` (it only checked
+  `instanceof IngestionError`). Now classified the same way a connection-phase failure is.
+  Caught by `test/integration.test.mjs`'s mid-body-stall test before this was committed.
+  `readJsonBody`'s own `E_ABORTED`/`E_RESPONSE_LIMIT`/`E_TOTAL_BYTES_LIMIT`/`E_RESPONSE_JSON`
+  throws are unaffected (already `instanceof IngestionError`).
+- B14 (full request URLs embedded in fetch error messages) is fixed: no thrown message
+  anywhere in fetch.mjs concatenates the request URL; only `.details.fetch.origin`
+  (origin only, never path/query) is attached, and that detail is itself the input to
+  `safeFailure`, which further replaces `E_FETCH`'s message with a generic phrase since it's
+  the one case built from `err.message` of an arbitrary injected `fetchImpl`.
+- Two test assumptions were corrected after they failed against real behavior, not by
+  weakening the underlying check: (1) the loopback server originally matched routes on
+  `req.url` including the query string fetchAll appends (`?page=1`), so every real-server
+  test 404'd — fixed to route by pathname. (2) A socket-close-within-N-ms assertion for the
+  pre-header-stall case was replaced with "no further request was made after the timeout" —
+  whether/when undici tears down the underlying TCP socket after an abort is its own
+  implementation detail, not something this package controls or needs to assert on; the
+  mid-body-stall case (where a socket-level assertion isn't needed to prove the same thing)
+  still proves the abort fires correctly.
+- `verifyAgainstFixtures`/`validateAdapter` don't call `fetchAll`, so they and both recorded
+  adapters' fixture extraction are unaffected by this task; not re-verified separately here
+  (Task 2's re-verification already covers that surface).
+- `scripts/run-earthquake-{offline,broken}.mjs` were converted and syntax-checked
+  (`node --check`) but deliberately **not executed** — they write to the real,
+  already-populated `store/`/`runs/` directories in this workspace, and the plan explicitly
+  prohibits running fixture scripts against real store paths as tests.
+
+**Deviations from plan:** None identified.
