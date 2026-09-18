@@ -111,3 +111,34 @@ credentials/query/fragment); `src/adapter.mjs` (`verifyAgainstFixtures` now read
   code `buildRecord` throws as of Task 1).
 
 **Deviations from plan:** None identified.
+
+## Task 3 — Reject invalid filters without changing matching behavior
+
+**Date:** 2026-09-18
+**Revision:** `b0d6683` (Task 2 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `src/filter.mjs` (new `validateFilter`; `applyFilter` validates once up front —
+including on a zero-record call — and throws `IngestionError('E_FILTER_INVALID', ...)`;
+`evaluateRule` validates its own rule when called directly; both validate `now` as
+`E_OPTIONS`); `src/config.mjs` (exported `isValidPathString`/`pathHasReservedSegment` for
+reuse, no new package subpath); `test/filter.test.mjs` extended.
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/filter.test.mjs` | 0 | 27/27 pass (6 before this task, confirmed via `git stash`; +21 new). | |
+| `npm test` (full suite) | 0 | 153/153 pass (132 before + 21 new). | |
+
+**Scenario status:** F01 — pass (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- Matching semantics (10 existing operators, array-intersection, missing-field pass/fail
+  table) are byte-for-byte unchanged — only a validation layer was added in front.
+- Reused `isValidPathString`/`pathHasReservedSegment` from config.mjs and `isValidDateOnly`
+  from normalize.mjs rather than writing second copies, per plan.md Task 3's file note.
+- `evaluateRule` re-validates on every call, including when invoked internally by
+  `applyFilter`'s per-record loop (already validated once at the top) — accepted as
+  redundant-but-correct per the plan's explicit "direct evaluateRule validates its rule too"
+  interface; the rule sets here are small enough that this costs nothing measurable.
+
+**Deviations from plan:** None identified.

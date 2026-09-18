@@ -5,12 +5,13 @@ As of 2026-09-18. Current code baseline: `179e5f4` (docs commit). Execution bran
 
 ## Next up (start here)
 
-**Tasks 0–2 are complete.** Read [plan.md](plan.md) Task 3, then execute it: add
-`validateFilter` to `src/filter.mjs` per section 3.5 (unknown-key/operand checks; empty
-`all`/`any` semantics preserved; `applyFilter` validates once, `evaluateRule` validates its
-own rule). Start with the invalid-mode-on-empty-store regression test in plan.md Task 3.
-Work sequentially through Tasks 3–12, one commit per completed task on
-`release/0.2.0-reliability`.
+**Tasks 0–3 are complete.** Read [plan.md](plan.md) Task 4, then execute it: create
+`src/http.mjs` and `test/helpers/http-server.mjs` (real loopback HTTP server); modify
+`src/fetch.mjs` to enforce actual byte/timeout/deadline limits via native Fetch, and convert
+existing Response test doubles to native `Response`. Start with the "actual bytes are
+limited without Content-Length" regression test in plan.md Task 4. This is the first task
+touching real network I/O — heavier than Tasks 0-3. Work sequentially through Tasks 4–12,
+one commit per completed task on `release/0.2.0-reliability`.
 
 ## Current state
 
@@ -35,11 +36,16 @@ Work sequentially through Tasks 3–12, one commit per completed task on
   over all rejected records with `errors` capped at 20 safe/bounded samples split into
   `missing` vs `invalid`; `src/adapter.mjs`'s `verifyAgainstFixtures` reads the full
   counters. 132/132 full suite passes (109 + 23 new). N01/N02/X01 proved.
+- Task 3 changes: `src/filter.mjs` gained `validateFilter` (section 3.5) — `applyFilter`
+  validates once up front (even for a zero-record call) and throws `E_FILTER_INVALID`;
+  `evaluateRule` validates its own rule when called directly; both reject an invalid `now`
+  as `E_OPTIONS`. Matching semantics (10 operators, array-intersection, missing-field
+  pass/fail table) unchanged. 153/153 full suite passes (132 + 21 new). F01 proved.
 
 ## Pending
 
-- Implementation tasks **3–12** and 31 of 38 scenario proofs remain pending (V01–V04, N01,
-  N02, X01 proved; see TEST-MATRIX.md).
+- Implementation tasks **4–12** and 30 of 38 scenario proofs remain pending (V01–V04, N01,
+  N02, X01, F01 proved; see TEST-MATRIX.md).
 - Key defects: pagination cutoff, mandatory identity, actual response limits, invalid entities/dates/config/filters, whole-file store reads, missing run exclusion, and incomplete saved reports.
 - package-lock.json root metadata is **0.0.0**, while package.json is **0.1.0**. Task 11 reconciles metadata; do not mass-update dependencies.
 - Current CI only tests Ubuntu / Node 24. Planned support proof covers Linux and Windows with Node 22.15.0, 22, and 24.

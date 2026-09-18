@@ -15,7 +15,7 @@ only — no scenario below is passed by plan inspection alone.
 | N01 | project | 2 | Numeric entity safety | Numeric entity correctness; huge/invalid/surrogate/zero references cannot throw. | test/normalize.test.mjs | `node --test test/normalize.test.mjs test/extract.test.mjs test/adapter.test.mjs` | pass | |
 | N02 | project | 2 | Date/time correctness | Leap/date/time checks and written-date timezone behavior; finite number compatibility. | test/normalize.test.mjs | same as N01 | pass | |
 | X01 | project | 2 | Mixed valid/invalid records | Mixed records retain valid rows with bounded actionable rejection samples. | test/extract.test.mjs | same as N01 | pass | |
-| F01 | project | 3 | Filter validation | Invalid filter rejected even on []; existing missing/array/empty semantics preserved. | TBD (Task 3) | TBD | unproven | |
+| F01 | project | 3 | Filter validation | Invalid filter rejected even on []; existing missing/array/empty semantics preserved. | test/filter.test.mjs | `node --test test/filter.test.mjs` | pass | |
 | H01 | project | 4 | Byte cap without Content-Length | Native chunked response without Content-Length is stopped by actual-byte cap. | TBD (Task 4) | TBD | unproven | |
 | H02 | project | 4 | Decoded/total/record limits | Decoded compressed/total-byte/record limits enforced before excess retention. | TBD (Task 4, cumulative-retry part completed Task 6) | TBD | unproven | |
 | H03 | project | 4 | Stall/timeout/abort cleanup | Native header/body stalls terminate via timeout/deadline/abort and release resources. | TBD (Task 4) | TBD | unproven | |

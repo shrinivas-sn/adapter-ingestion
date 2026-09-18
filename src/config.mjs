@@ -50,12 +50,15 @@ function hasReservedHostBasename(host) {
   return RESERVED_HOST_BASENAME.test(host.split('.')[0]);
 }
 
-function pathHasReservedSegment(path) {
+// Exported for reuse by filter.mjs (rule.field uses the same own-property
+// dot-path syntax as a map rule's path) -- one path-shape check, not a
+// second one per caller.
+export function pathHasReservedSegment(path) {
   if (typeof path !== 'string' || path === '$') return false;
   return path.split('.').some((seg) => RESERVED_NAMES.has(seg));
 }
 
-function isValidPathString(path) {
+export function isValidPathString(path) {
   if (typeof path !== 'string' || path.length === 0) return false;
   if (path === '$') return true;
   return path.split('.').every((seg) => seg.length > 0);
