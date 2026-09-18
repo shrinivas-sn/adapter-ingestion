@@ -26,10 +26,10 @@ only — no scenario below is passed by plan inspection alone.
 | R01 | project | 6 | Retryable status classification | 503->200 uses two attempts; 401/403/404/invalid JSON use one. | test/fetch.test.mjs, test/integration.test.mjs | `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | pass | |
 | R02 | project | 6 | Retry-After handling | Retry-After seconds/date respected; excessive delay deferred; attempts/budget bounded. | test/fetch.test.mjs, test/integration.test.mjs | same as R01 | pass | |
 | R03 | project | 6 | Abort during wait / pacing | Abort during retry wait prevents next request; page pacing actually occurs. | test/fetch.test.mjs, test/integration.test.mjs | same as R01 | pass | |
-| S01 | project | 7 | Store iterator correctness | JSONL/CRLF/split UTF-8/final-line/no-file plus latest/index semantics. | TBD (Task 7) | TBD | unproven | |
-| S02 | project | 7 | Corrupt-line handling | Bad lines warn; large line fails early; non-ENOENT failures are visible. | TBD (Task 7) | TBD | unproven | |
-| S03 | project | 7 | Preflight/tail repair | Invalid batch writes zero; prior partial tail repair preserves old/new records. | TBD (Task 7) | TBD | unproven | |
-| S04 | project | 7 | Bounded-memory scale proof | 256 MiB history, 100 IDs reduces under 96 MiB V8 heap; early break closes handle. | scripts/verify-store-scale.mjs (Task 7) | TBD | unproven | |
+| S01 | project | 7 | Store iterator correctness | JSONL/CRLF/split UTF-8/final-line/no-file plus latest/index semantics. | test/store.test.mjs | `node --test test/store.test.mjs` | pass | |
+| S02 | project | 7 | Corrupt-line handling | Bad lines warn; large line fails early; non-ENOENT failures are visible. | test/store.test.mjs | same as S01 | pass | |
+| S03 | project | 7 | Preflight/tail repair | Invalid batch writes zero; prior partial tail repair preserves old/new records. | test/store.test.mjs | same as S01 | pass | |
+| S04 | project | 7 | Bounded-memory scale proof | 256 MiB history, 100 IDs reduces under 96 MiB V8 heap; early break closes handle. | scripts/verify-store-scale.mjs | `node scripts/verify-store-scale.mjs` | pass | |
 | L01 | project | 8 | Concurrent lock ownership | Actual concurrent processes: one enters, contender fails before fetch/mutation. | TBD (Task 8, orchestration boundary completed Task 10) | TBD | unproven | |
 | L02 | project | 8 | Lock cleanup / crash recovery | Owned cleanup on success/error; crash leaves lock; only explicit recovery permits replay. | TBD (Task 8) | TBD | unproven | |
 | O01 | project | 9 | Persisted vs returned canary agreement | Persisted and returned canary agree; terminal outcomes/counts accurate. | TBD (Task 9) | TBD | unproven | |

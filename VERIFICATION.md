@@ -270,6 +270,69 @@ cumulative-retry-bytes proof; three prior H03/H04 tests given the same explicit
 
 **Deviations from plan:** None identified.
 
+## Task 7 — Stream history and preserve replay after incomplete writes
+
+**Date:** 2026-09-18
+**Revision:** `dc7e358` (Task 6 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `src/store.mjs` rewritten (new `iterateRecords` async generator — bounded 64 KiB
+chunk reads via a raw file handle, a line's bytes held as an array of Buffer slices and
+concatenated exactly once when the line completes rather than repeatedly, `maxLineBytes`
+enforced immediately on every append to the pending line rather than only after buffering an
+entire oversized line, CRLF tolerated by trimming a trailing `\r` off the assembled line,
+UTF-8 decoded only once a complete line's bytes are known so a multi-byte character split
+across a chunk boundary can't corrupt; malformed JSON/non-object JSON warns
+`W_STORE_CORRUPT_LINE`, a well-formed object missing a nonempty string `id`/`content_hash`
+warns `W_STORE_INVALID_RECORD`; `readRecords`/`readLatestRecords`/`readIndex` now consume the
+iterator directly — the latter two reduce without ever building the intermediate records
+array `readRecords` still does; `appendRecords` preflights id/hash shape, JSON
+serialization, and per-line size for the *entire* batch, one record at a time, before any
+file mutation, then writes/syncs/closes in a `finally`). New `scripts/verify-store-scale.mjs`
+(disposable 256 MiB fixture generated in bounded batches, verified in a child process capped
+at `--max-old-space-size=96`). `test/store.test.mjs` extended with the full S01–S04 table.
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/store.test.mjs` | 0 | 24/24 pass (6 before this task, confirmed via `git stash -u`; +18 new). | |
+| `npm test` (full suite) | 0 | 218/218 pass (200 before + 18 new). | |
+| `node scripts/verify-store-scale.mjs` | 0 | Generated 66,041 records / 256.0 MiB in 3853ms. Child (heap capped at 96 MB): `readIndex` 1735ms, `readLatestRecords` 1972ms, both confirming all 100 unique ids with the correct latest `content_hash`; `heapUsedMb` 17.82, `rssMb` 77.60 — comfortably under the 96 MB heap cap. Output verbatim: `{"heapLimitMb":96,"uniqueIds":100,"readIndexMs":1735.3922,"readLatestRecordsMs":1971.6174,"heapUsedMb":17.823455810546875,"rssMb":77.6015625}` | Proves repeated-history reduction under 100 unique ids at this scale, not unlimited unique-ID capacity (index growth is O(unique ids), documented as a standing limit). |
+| `node --check src/store.mjs`, `node --check scripts/verify-store-scale.mjs` | 0 | Syntax valid. | |
+
+**Scenario status:** S01, S02, S03, S04 — pass (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- An ENOTDIR-style "file where a directory is expected" trick (used successfully in earlier
+  tasks' Windows-portable error simulation) was tried first for S02's "genuine non-ENOENT
+  read error" case and empirically failed: probed directly, `open()` on a path with a regular
+  file standing in for a directory component reports plain `ENOENT` on Windows, not a
+  distinct code — which this package's `iterateRecords` correctly treats as "missing file,"
+  making that specific trick unusable here. Replaced with a path containing an embedded null
+  byte, which Node's own `fs` path validation rejects with `ERR_INVALID_ARG_VALUE` on both
+  platforms (verified) — a real, portable, non-ACL, non-ENOENT failure.
+- CHUNK_BYTES (64 KiB) is an internal implementation constant, not part of the public
+  interface — the "multi-byte UTF-8 split across a chunk boundary" test necessarily hardcodes
+  the same 64 KiB value to construct a fixture that straddles the real boundary; a comment at
+  the test site flags this coupling so a future change to the internal chunk size doesn't
+  silently make that specific test stop testing what it claims to.
+- `finalizeLine`'s size/CRLF/blank/parse/shape checks run in the same order for both a
+  newline-terminated line and a final unterminated tail at EOF (both funnel through the same
+  function) — a truncated final tail from a crash is treated exactly like a corrupt
+  mid-file line (`W_STORE_CORRUPT_LINE`, skipped), not as a special case, matching section
+  5.3's "corrupt tail is warned" recovery expectation.
+- `appendRecords`'s preflight validates id/hash shape and attempts `JSON.stringify` per
+  record before checking that record's serialized byte length — order doesn't affect
+  outcome (an invalid-shape record and an internally-cyclic record are both rejected
+  before any write regardless of which check fires first), but is worth noting since the
+  plan lists "serialization, id/hash shape, and per-line size" without an explicit sequence.
+- The scale script's 4 KiB-per-record padding, 100-id rotation, and 256 MiB target produced
+  66,041 total records (not a round number) — expected, since payload size is only
+  "approximately" 4 KiB per the plan's own wording (JSON structural overhead varies slightly
+  per record), and the script stops as soon as the cumulative byte count reaches the target,
+  not at a fixed record count.
+
+**Deviations from plan:** None identified.
+
 ## Task 4 — Enforce native body limits, timeouts, and safe failures
 
 **Date:** 2026-09-18
