@@ -6,12 +6,15 @@ import { safeFailure } from '../src/errors.mjs';
 import { startServer } from './helpers/http-server.mjs';
 
 function baseAdapter(origin, overrides = {}) {
+  // No pagination by default -- these transport-focused tests care about
+  // byte caps/timeouts/redirects, not pagination completeness, and
+  // triggering that separate concern (a full single page hitting max_pages
+  // without allow_truncation) would be an unrelated false failure here.
   return {
     host: '127.0.0.1', records_path: '$',
     access: { kind: 'json-api', url: `${origin}/data` },
     fetch: {
       method: 'GET',
-      pagination: { style: 'page-param', param: 'page', max_pages: 1 },
       timeout_ms: 500,
       ...overrides,
     },
@@ -80,16 +83,21 @@ test('H02: a gzip-compressed body that decompresses over the cap is rejected', a
 });
 
 test('H02: max_total_bytes is enforced cumulatively across pages, not per response', async (t) => {
-  const chunk = JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ id: i, pad: 'z'.repeat(30) })));
+  // Each page's content must actually differ (includes its own page number)
+  // -- a byte-identical batch across pages is legitimately flagged as
+  // E_PAGINATION_REPEAT (Task 5), which is a different failure than the one
+  // this test is proving.
+  const pageBody = (n) => JSON.stringify(Array.from({ length: 200 }, (_, i) => ({ id: `${n}-${i}`, pad: 'z'.repeat(30) })));
   const { origin, close } = await startServer({
     '/data': (req, res) => {
+      const page = new URL(req.url, 'http://x').searchParams.get('page') ?? '1';
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(chunk);
+      res.end(pageBody(page));
     },
   });
   t.after(close);
 
-  const bytesPerPage = Buffer.byteLength(chunk, 'utf8');
+  const bytesPerPage = Buffer.byteLength(pageBody('1'), 'utf8');
   const adapter = baseAdapter(origin, {
     // Each page is well under max_response_bytes individually, but three
     // pages together exceed max_total_bytes.

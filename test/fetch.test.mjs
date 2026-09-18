@@ -29,12 +29,24 @@ test('the configured User-Agent is sent on every request', async () => {
   assert.deepEqual(seen, ['<BROWSER_UA>']);
 });
 
-test('pagination stops on a short page and respects max_pages', async () => {
+test('pagination stops on a short page and respects max_pages, with allow_truncation set', async () => {
+  const truncating = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { ...adapter.fetch.pagination, allow_truncation: true } } };
   let page = 0;
   const impl = async () => jsonResponse(++page <= 5 ? [{ id: page * 10 }, { id: page * 10 + 1 }] : []);
-  const { items, pages } = await fetchAll(adapter, { fetchImpl: impl });
+  const { items, pages, diagnostics } = await fetchAll(truncating, { fetchImpl: impl });
   assert.equal(pages, 3);
   assert.equal(items.length, 6);
+  assert.equal(diagnostics.complete, false);
+  assert.equal(diagnostics.stop_reason, 'max_pages');
+});
+
+// --- P02: the default (no allow_truncation) rejects a cap hit on a non-terminal page ---
+
+test('hitting max_pages on a still-full page is rejected by default (no allow_truncation)', async () => {
+  let page = 0;
+  const impl = async () => jsonResponse(++page <= 5 ? [{ id: page * 10 }, { id: page * 10 + 1 }] : []);
+  await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), (err) => err.code === 'E_PAGE_LIMIT');
 });
 
 test('a non-ok status throws with the status code, so a UA block fails loudly', async () => {
@@ -87,9 +99,106 @@ test('a response over max_response_bytes is rejected before the body is read', a
 // --- E_RECORD_LIMIT checked before an unbounded spread ---
 
 test('max_records is enforced before appending, not after an unbounded spread', async () => {
-  const limited = { ...adapter, fetch: { ...adapter.fetch, max_records: 3, pagination: { style: 'page-param', param: 'page', max_pages: 1 } } };
+  const limited = { ...adapter, fetch: { ...adapter.fetch, max_records: 3, pagination: { style: 'page-param', param: 'page', max_pages: 1, allow_truncation: true } } };
   const impl = async () => jsonResponse(Array.from({ length: 10 }, (_, i) => ({ id: i })));
   await assert.rejects(() => fetchAll(limited, { fetchImpl: impl }), (err) => err.code === 'E_RECORD_LIMIT');
+});
+
+test('exactly max_records is accepted; one more overflows', async () => {
+  const exact = { ...adapter, fetch: { ...adapter.fetch, max_records: 4,
+    pagination: { style: 'page-param', param: 'page', per_page: 2, max_pages: 2, allow_truncation: true } } };
+  let page = 0;
+  const impl = async () => jsonResponse([{ id: ++page * 10 }, { id: page * 10 + 1 }]);
+  const { items } = await fetchAll(exact, { fetchImpl: impl });
+  assert.equal(items.length, 4);
+
+  page = 0;
+  const overflow = { ...exact, fetch: { ...exact.fetch, max_records: 3 } };
+  await assert.rejects(() => fetchAll(overflow, { fetchImpl: impl }), (err) => err.code === 'E_RECORD_LIMIT');
+});
+
+// --- P03: repeated-page detection and legitimate overlapping IDs ---
+
+test('an endpoint that ignores its page parameter and repeats a batch fails E_PAGINATION_REPEAT', async () => {
+  const paginated = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', max_pages: 3 } } };
+  // Same content every time, regardless of the page query param actually sent.
+  const impl = async () => jsonResponse([{ id: 1 }, { id: 2 }]);
+  await assert.rejects(() => fetchAll(paginated, { fetchImpl: impl }), (err) => err.code === 'E_PAGINATION_REPEAT');
+});
+
+test('E_PAGINATION_REPEAT fires even with allow_truncation set', async () => {
+  const paginated = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', max_pages: 3, allow_truncation: true } } };
+  const impl = async () => jsonResponse([{ id: 1 }, { id: 2 }]);
+  await assert.rejects(() => fetchAll(paginated, { fetchImpl: impl }), (err) => err.code === 'E_PAGINATION_REPEAT');
+});
+
+test('overlapping IDs across genuinely different batches are valid, not a repeat', async () => {
+  const paginated = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', max_pages: 2 } } };
+  const batches = [[{ id: 1 }, { id: 2 }], []];
+  // Page 2 differs (empty), so no false repeat — but a later, separate test
+  // exercises truly overlapping non-identical batches below.
+  const impl = async () => jsonResponse(batches.shift());
+  const { items } = await fetchAll(paginated, { fetchImpl: impl });
+  assert.equal(items.length, 2);
+});
+
+test('two different batches that happen to share an ID do not trigger repeat detection', async () => {
+  const paginated = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', per_page: 2, max_pages: 2, allow_truncation: true } } };
+  const batches = [
+    [{ id: 2, v: 'first' }, { id: 3, v: 'first' }],
+    [{ id: 2, v: 'second' }, { id: 4, v: 'second' }], // id 2 overlaps but the batch content differs
+  ];
+  const impl = async () => jsonResponse(batches.shift());
+  const { items } = await fetchAll(paginated, { fetchImpl: impl });
+  assert.equal(items.length, 4);
+});
+
+// --- Termination table: single page, empty page, unknown page size, cap of 1 ---
+
+test('no pagination configured: one response is always complete, stop_reason single_page', async () => {
+  const unpaginated = { ...adapter, fetch: { method: 'GET' } };
+  const impl = async () => jsonResponse([{ id: 1 }]);
+  const { diagnostics } = await fetchAll(unpaginated, { fetchImpl: impl });
+  assert.equal(diagnostics.complete, true);
+  assert.equal(diagnostics.stop_reason, 'single_page');
+});
+
+test('an empty first page is complete, stop_reason empty_page', async () => {
+  const paginated = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', max_pages: 3 } } };
+  const impl = async () => jsonResponse([]);
+  const { items, pages, diagnostics } = await fetchAll(paginated, { fetchImpl: impl });
+  assert.equal(items.length, 0);
+  assert.equal(pages, 1);
+  assert.equal(diagnostics.complete, true);
+  assert.equal(diagnostics.stop_reason, 'empty_page');
+});
+
+test('unknown page size (no per_page declared) continues until an empty page', async () => {
+  const a = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', max_pages: 3 } } };
+  const batches = [[{ id: 1 }], [{ id: 2 }], []];
+  const result = await fetchAll(a, { fetchImpl: async () => jsonResponse(batches.shift()) });
+  assert.equal(result.pages, 3);
+  assert.equal(result.items.length, 2);
+  assert.equal(result.diagnostics.complete, true);
+  assert.equal(result.diagnostics.stop_reason, 'empty_page');
+});
+
+test('max_pages of exactly 1 still requires allow_truncation if the single page looks full', async () => {
+  const capOne = { ...adapter, fetch: { ...adapter.fetch,
+    pagination: { style: 'page-param', param: 'page', per_page: 2, max_pages: 1 } } };
+  const impl = async () => jsonResponse([{ id: 1 }, { id: 2 }]); // exactly per_page, looks full
+  await assert.rejects(() => fetchAll(capOne, { fetchImpl: impl }), (err) => err.code === 'E_PAGE_LIMIT');
+
+  const allowed = { ...capOne, fetch: { ...capOne.fetch, pagination: { ...capOne.fetch.pagination, allow_truncation: true } } };
+  const { diagnostics } = await fetchAll(allowed, { fetchImpl: impl });
+  assert.equal(diagnostics.complete, false);
+  assert.equal(diagnostics.stop_reason, 'max_pages');
 });
 
 // --- max_duration_ms: the whole fetch phase has a deadline, not just each attempt ---

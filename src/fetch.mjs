@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { getPath } from './extract.mjs';
 import { readJsonBody } from './http.mjs';
 import { IngestionError } from './errors.mjs';
@@ -31,10 +32,19 @@ async function drainQuietly(res) {
   try { await res.body?.cancel?.(); } catch { /* already closed or errored */ }
 }
 
+// Response-order-sensitive: a source that echoes different content because
+// records were reordered is not a repeat, but two responses byte-identical
+// as delivered means the page parameter almost certainly did nothing.
+function digestBatch(batch) {
+  return createHash('sha256').update(JSON.stringify(batch)).digest('hex');
+}
+
 export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {}) {
   const p = adapter.fetch?.pagination;
+  const hasPagination = p !== undefined;
   const maxPages = p?.max_pages ?? 1;
-  const perPage = p?.per_page ?? Infinity;
+  const perPage = p?.per_page; // undefined means "unknown" -- never infer a short page without it
+  const allowTruncation = p?.allow_truncation ?? false;
   const timeoutMs = adapter.fetch?.timeout_ms ?? 30_000;
   const maxDurationMs = adapter.fetch?.max_duration_ms ?? 120_000;
   const maxRecords = adapter.fetch?.max_records ?? 5000;
@@ -49,8 +59,12 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
 
   const items = [];
   const statuses = [];
+  const warnings = [];
   let pages = 0;
   let totalBytes = 0;
+  let complete = true;
+  let stopReason = hasPagination ? null : 'single_page';
+  let lastBatchDigest = null;
 
   for (let page = 1; page <= maxPages; page++) {
     const fetchContext = () => ({ fetch: { origin, page, pages, statuses: [...statuses] } });
@@ -90,7 +104,9 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
     statuses.push(res.status);
 
     // Fail loudly. A UA-only bot gate shows up here as a 403 and must never be
-    // swallowed into an empty result that looks like "no new records".
+    // swallowed into an empty result that looks like "no new records", and a
+    // 400/404 on a later page is never treated as a normal end-of-list --
+    // only an actually empty or short batch signals completion.
     if (!res.ok) {
       await drainQuietly(res);
       throw new IngestionError('E_HTTP_STATUS', `unexpected HTTP status ${res.status}`,
@@ -146,6 +162,17 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
         { details: fetchContext() });
     }
     pages++;
+
+    if (batch.length > 0) {
+      const digest = digestBatch(batch);
+      if (lastBatchDigest !== null && digest === lastBatchDigest) {
+        throw new IngestionError('E_PAGINATION_REPEAT',
+          'pagination returned an exact repeat of the previous page — the endpoint may be ignoring the page parameter',
+          { details: fetchContext() });
+      }
+      lastBatchDigest = digest;
+    }
+
     if (items.length + batch.length > maxRecords) {
       throw new IngestionError('E_RECORD_LIMIT', `fetch exceeded max_records (${maxRecords})`,
         { details: fetchContext() });
@@ -153,8 +180,36 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
     // Not `items.push(...batch)` -- spreading an arbitrarily large batch as
     // call arguments risks blowing the engine's argument-count limit.
     for (const record of batch) items.push(record);
-    if (batch.length < perPage) break;
+
+    if (!hasPagination) {
+      complete = true; stopReason = 'single_page';
+      break;
+    }
+    if (batch.length === 0) {
+      complete = true; stopReason = 'empty_page';
+      break;
+    }
+    if (perPage !== undefined && batch.length < perPage) {
+      complete = true; stopReason = 'short_page';
+      break;
+    }
+    if (page === maxPages) {
+      // The batch still looks "full" (or per_page is unknown, so we can't
+      // tell) and there is no next page left to request -- this is a
+      // truncation, not a natural end, unless the adapter explicitly opted
+      // into a bounded window.
+      if (!allowTruncation) {
+        throw new IngestionError('E_PAGE_LIMIT',
+          `reached max_pages (${maxPages}) on a non-terminal page; set fetch.pagination.allow_truncation to accept a bounded window`,
+          { details: fetchContext() });
+      }
+      complete = false; stopReason = 'max_pages';
+      warnings.push({ code: 'W_PAGE_LIMIT', message: `stopped at max_pages (${maxPages}) with allow_truncation` });
+    }
   }
 
-  return { items, pages, statuses, diagnostics: { bytes: totalBytes, pages, statuses: [...statuses] } };
+  return {
+    items, pages, statuses,
+    diagnostics: { bytes: totalBytes, pages, statuses: [...statuses], complete, stop_reason: stopReason, warnings },
+  };
 }

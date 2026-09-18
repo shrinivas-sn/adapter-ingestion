@@ -143,6 +143,53 @@ reuse, no new package subpath); `test/filter.test.mjs` extended.
 
 **Deviations from plan:** None identified.
 
+## Task 5 — Fix pagination and make truncation explicit
+
+**Date:** 2026-09-18
+**Revision:** `14a6beb` (Task 4 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `src/fetch.mjs` (`perPage` is now `undefined` when omitted instead of defaulting to
+`Infinity`, so a short page can never be inferred without a declared `per_page`; added
+`diagnostics.complete`/`stop_reason` per the section 4.3 termination table — `single_page`,
+`empty_page`, `short_page`, `max_pages`; `allow_truncation` opt-in that turns a cap-hit on a
+still-full page from `E_PAGE_LIMIT` into `complete:false` plus a `W_PAGE_LIMIT` warning;
+new `digestBatch` — SHA-256 of `JSON.stringify(batch)` in response order — throws
+`E_PAGINATION_REPEAT` on an exact nonempty-batch repeat even with `allow_truncation` set);
+`adapters/www.karnatakacareers.org.adapter.json` (`allow_truncation: true` added — its real
+pagination legitimately returns a full last page); `test/fetch.test.mjs` extended (P01–P03);
+`test/integration.test.mjs` adjusted (transport tests now explicitly opt into
+`allow_truncation` or vary each page's content, so they don't trip the two new,
+unrelated pagination checks); `test/run.test.mjs` adjusted (`allow_truncation: true` added
+to its fixture adapter, whose recorded page is a genuinely full single page).
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | 0 | 42/42 pass (32 before this task, confirmed via `git stash`; +10 new). | |
+| `npm test` (full suite) | 0 | 180/180 pass (170 before + 10 new). | |
+
+**Scenario status:** P01, P02, P03 — pass (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- Repeat detection only fires on a *nonempty* batch digest match — two consecutive empty
+  pages (which can't happen inside the loop, since an empty batch always breaks with
+  `empty_page` first) or two empty responses across independent calls are not a repeat by
+  construction, matching section 4.3's "exact repeat of a prior nonempty batch."
+- The cap-hit/truncation check (`page === maxPages` reached on a batch that still looks full,
+  or whose fullness can't be determined because `per_page` is undefined) runs *after* the
+  repeat check, so a source that repeats its final page is always reported as
+  `E_PAGINATION_REPEAT`, never silently accepted as a truncated-but-distinct window.
+- `test/integration.test.mjs`'s `H02` cumulative-bytes test previously sent byte-identical
+  page bodies by construction (same fixed array every response) — harmless before Task 5,
+  but now a true positive for `E_PAGINATION_REPEAT` since it's a real exact repeat. Fixed by
+  making each page's payload include its own page number rather than by suppressing the new
+  check; the byte-cap assertion itself is unaffected since total bytes across the (now
+  slightly larger, still deterministic) three pages is unchanged.
+- No adapter behavior change for `earthquake.usgs.gov`: it uses no pagination config at all,
+  so it was and remains `stop_reason: 'single_page'`, unaffected by this task.
+
+**Deviations from plan:** None identified.
+
 ## Task 4 — Enforce native body limits, timeouts, and safe failures
 
 **Date:** 2026-09-18
