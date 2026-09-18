@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildUrl, fetchAll } from '../src/fetch.mjs';
 import { safeFailure } from '../src/errors.mjs';
+import { retryDelay, waitFor } from '../src/http.mjs';
 import { jsonResponse } from './helpers/fixtures.mjs';
 
 const adapter = {
@@ -76,8 +77,11 @@ test('every request carries an abort signal so a hung connection can be cut off'
 test('a timeout-shaped abort is reported as a timeout, not a generic failure', async () => {
   // Exercises the error-message branch fetchAll takes when the signal fires,
   // without depending on a real timer actually elapsing in the test run.
+  // E_TIMEOUT is retryable by default (Task 6); this test is about
+  // classification, not retry behavior, so a single attempt keeps it fast.
+  const single = { ...adapter, fetch: { ...adapter.fetch, retry: { max_attempts: 1 } } };
   const impl = async () => { throw new DOMException('aborted', 'TimeoutError'); };
-  await assert.rejects(() => fetchAll(adapter, { fetchImpl: impl }), /timed out/);
+  await assert.rejects(() => fetchAll(single, { fetchImpl: impl }), /timed out/);
 });
 
 test('a response over max_response_bytes is rejected before the body is read', async () => {
@@ -237,10 +241,12 @@ test('fetchAll rejects immediately with E_ABORTED when the caller signal is alre
 // --- H04: safe failures never embed the full request URL (query/secrets) ---
 
 test('a fetch failure never embeds the request URL (query string, potential secrets) in its message', async () => {
+  // E_FETCH is retryable by default (Task 6); this test is about safe
+  // projection, not retry behavior, so a single attempt keeps it fast.
   const secretAdapter = {
     ...adapter,
     access: { kind: 'json-api', url: 'https://example.test/api?token=SUPER_SECRET_TOKEN' },
-    fetch: { ...adapter.fetch, pagination: { style: 'page-param', param: 'page', max_pages: 1 } },
+    fetch: { ...adapter.fetch, pagination: { style: 'page-param', param: 'page', max_pages: 1 }, retry: { max_attempts: 1 } },
   };
   const impl = async () => { throw new Error('DNS lookup failed'); };
   try {
@@ -276,4 +282,105 @@ test('safeFailure never trusts a non-IngestionError to describe itself', () => {
   assert.equal(safe.code, 'E_FETCH');
   assert.equal(safe.message, 'an unexpected error occurred');
   assert.equal(safe.stage, 'fetch');
+});
+
+// --- retryDelay: pure arithmetic, exhaustively testable without real waits ---
+
+test('retryDelay: no Retry-After uses jitter alone, in [0, ceiling]', () => {
+  const zero = retryDelay({ retryNumber: 1, backoffMs: 500, maxDelayMs: 10_000, retryAfter: undefined, random: () => 0 });
+  assert.deepEqual(zero, { delayMs: 0, deferred: false, retryAfterMs: null });
+
+  // random() returning just under 1 must not reach the ceiling itself —
+  // full jitter is uniform in [0, ceiling), not [0, ceiling].
+  const nearMax = retryDelay({ retryNumber: 1, backoffMs: 500, maxDelayMs: 10_000, retryAfter: undefined, random: () => 0.999999 });
+  assert.ok(nearMax.delayMs < 500 && nearMax.delayMs > 490);
+});
+
+test('retryDelay: exponential ceiling doubles per attempt and saturates at max_delay_ms', () => {
+  const at = (retryNumber) => retryDelay({ retryNumber, backoffMs: 1000, maxDelayMs: 3000, retryAfter: undefined, random: () => 1 }).delayMs;
+  assert.equal(at(1), 1000); // 1000 * 2^0
+  assert.equal(at(2), 2000); // 1000 * 2^1
+  assert.equal(at(3), 3000); // 1000 * 2^2 = 4000, capped at max_delay_ms
+  assert.equal(at(4), 3000); // stays capped
+});
+
+test('retryDelay: Retry-After in integer seconds is honored as a floor over jitter', () => {
+  const r = retryDelay({ retryNumber: 1, backoffMs: 0, maxDelayMs: 10_000, retryAfter: '2', random: () => 0 });
+  assert.deepEqual(r, { delayMs: 2000, deferred: false, retryAfterMs: 2000 });
+});
+
+test('retryDelay: Retry-After as an HTTP-date is honored; a past date collapses to 0', () => {
+  const now = Date.UTC(2026, 0, 1, 0, 0, 0);
+  const future = new Date(now + 5000).toUTCString();
+  const r = retryDelay({ retryNumber: 1, backoffMs: 0, maxDelayMs: 10_000, retryAfter: future, nowMs: now, random: () => 0 });
+  assert.equal(r.deferred, false);
+  assert.ok(Math.abs(r.retryAfterMs - 5000) <= 1000, 'HTTP-date has 1-second resolution');
+
+  const past = new Date(now - 5000).toUTCString();
+  const pastResult = retryDelay({ retryNumber: 1, backoffMs: 0, maxDelayMs: 10_000, retryAfter: past, nowMs: now, random: () => 0 });
+  assert.deepEqual(pastResult, { delayMs: 0, deferred: false, retryAfterMs: 0 });
+});
+
+test('retryDelay: an invalid Retry-After header falls back to local backoff, not a crash', () => {
+  const r = retryDelay({ retryNumber: 1, backoffMs: 500, maxDelayMs: 10_000, retryAfter: 'not-a-real-header-value', random: () => 0 });
+  assert.deepEqual(r, { delayMs: 0, deferred: false, retryAfterMs: null });
+});
+
+test('retryDelay: a Retry-After beyond max_delay_ms is deferred, never silently shortened', () => {
+  const r = retryDelay({ retryNumber: 1, backoffMs: 500, maxDelayMs: 10_000, retryAfter: '20', random: () => 0 });
+  assert.deepEqual(r, { delayMs: null, deferred: true, retryAfterMs: 20_000 });
+});
+
+// --- waitFor: abortable delay ---
+
+test('waitFor resolves after the timer and rejects immediately for an already-aborted signal', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  await assert.rejects(waitFor(1000, ac.signal), (err) => err.code === 'E_ABORTED');
+
+  const start = Date.now();
+  await waitFor(20, undefined);
+  assert.ok(Date.now() - start >= 15);
+});
+
+test('waitFor rejects and cleans up as soon as the signal aborts mid-wait', async () => {
+  const ac = new AbortController();
+  const pending = waitFor(10_000, ac.signal);
+  setTimeout(() => ac.abort(), 20);
+  const start = Date.now();
+  await assert.rejects(pending, (err) => err.code === 'E_ABORTED');
+  assert.ok(Date.now() - start < 1000, 'must not wait for the full 10s timer once aborted');
+});
+
+// --- R01: transient failures are retried within max_attempts, permanent ones are not ---
+
+test('a transient 503 retries once before succeeding, and diagnostics count attempts/retries', async () => {
+  let calls = 0;
+  const a = { ...adapter, fetch: { ...adapter.fetch, pagination: undefined,
+    retry: { max_attempts: 3, backoff_ms: 0, max_delay_ms: 0 } } };
+  const r = await fetchAll(a, { fetchImpl: async () =>
+    (++calls === 1 ? jsonResponse({}, { status: 503 }) : jsonResponse([])) });
+  assert.equal(calls, 2);
+  assert.equal(r.diagnostics.attempts, 2);
+  assert.equal(r.diagnostics.retries, 1);
+});
+
+test('a 401/403/404 is never retried, even with retries enabled', async () => {
+  for (const status of [401, 403, 404]) {
+    let calls = 0;
+    const a = { ...adapter, fetch: { ...adapter.fetch, pagination: undefined,
+      retry: { max_attempts: 3, backoff_ms: 0, max_delay_ms: 0 } } };
+    await assert.rejects(() => fetchAll(a, { fetchImpl: async () => { calls++; return jsonResponse({}, { status }); } }),
+      (err) => err.code === 'E_HTTP_STATUS');
+    assert.equal(calls, 1, `status ${status} must not be retried`);
+  }
+});
+
+test('retries are exhausted after max_attempts, surfacing the last failure', async () => {
+  let calls = 0;
+  const a = { ...adapter, fetch: { ...adapter.fetch, pagination: undefined,
+    retry: { max_attempts: 2, backoff_ms: 0, max_delay_ms: 0 } } };
+  await assert.rejects(() => fetchAll(a, { fetchImpl: async () => { calls++; return jsonResponse({}, { status: 503 }); } }),
+    (err) => err.code === 'E_HTTP_STATUS');
+  assert.equal(calls, 2);
 });

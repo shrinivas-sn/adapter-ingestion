@@ -190,6 +190,86 @@ to its fixture adapter, whose recorded page is a genuinely full single page).
 
 **Deviations from plan:** None identified.
 
+## Task 6 — Add bounded retries, pacing, and cancellation through waits
+
+**Date:** 2026-09-18
+**Revision:** `a22aed4` (Task 5 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `src/http.mjs` (new `retryDelay` — pure, injectable `nowMs`/`random`, full-jitter
+exponential backoff capped at `max_delay_ms`, honors a parsed `Retry-After` as a floor and
+returns `deferred: true` when it can't be honored within `max_delay_ms`; new internal
+`parseRetryAfterMs` — integer seconds or HTTP-date, past date to 0, invalid to `null`; new
+`waitFor` — abortable delay, removes its timer/listener on every exit path); `src/fetch.mjs`
+(the single fetch attempt per page became a bounded per-page retry loop — fresh
+`AbortSignal.timeout` per attempt, `isRetryableError` restricted to `E_FETCH`/`E_TIMEOUT`/
+retryable `E_HTTP_STATUS` (408/429/500/502/503/504), `E_RETRY_DEFERRED` when a server
+`Retry-After` exceeds `retry.max_delay_ms` or the remaining `max_duration_ms` budget; added
+`delay_ms` pacing between successful pages; `diagnostics.bytes` now reads from the shared
+per-call `budget.bytes` instead of a success-only running total, so bytes consumed by a
+stalled/retried attempt are no longer dropped; added `diagnostics.attempts`/`diagnostics.retries`).
+`test/fetch.test.mjs` extended (pure `retryDelay`/`waitFor` table, R01 fake-`fetchImpl`
+regression, two prior tests given explicit `retry: { max_attempts: 1 }` since E_TIMEOUT/E_FETCH
+became retryable by default and those tests are about classification, not retries).
+`test/integration.test.mjs` extended (real-server R01–R03 tests, the completed H02
+cumulative-retry-bytes proof; three prior H03/H04 tests given the same explicit
+`max_attempts: 1` opt-out for the same reason).
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | 0 | 62/62 pass (42 before this task, confirmed via `git stash`; +20 new). | |
+| `npm test` (full suite) | 0 | 200/200 pass (180 before + 20 new). | |
+| `node --check` on `src/http.mjs`, `src/fetch.mjs` | 0 | Syntax valid. | |
+| Throwaway probe script (`node -e ...`, not committed): a real loopback server destroying the socket before any response | 0 | `fetch()` rejects with `TypeError('fetch failed')`, `err.cause.code === 'UND_ERR_SOCKET'` — not `TimeoutError`/`AbortError` — confirming `classifyFetchError` correctly falls through to the generic, retryable `E_FETCH` rather than being guessed. | |
+
+**Scenario status:** R01, R02, R03 — pass; H02's cumulative-across-*retries* evidence
+(deferred from Task 4) is now complete (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- **"Stop instead of issuing another attempt" vs. `E_RETRY_DEFERRED` are two different
+  outcomes, deliberately.** Section 4.2 distinguishes a server-specified `Retry-After` that
+  can't be honored (fails loudly with `E_RETRY_DEFERRED` and `retry_after_ms`, since the
+  server gave an explicit, actionable directive the caller may want to reschedule around)
+  from a plain exponential-backoff wait that would exceed the remaining `max_duration_ms`
+  budget (no server directive exists to report, so `fetchAll` just gives up quietly and
+  rethrows the failure that actually happened — the last 503/timeout/etc. — rather than
+  manufacturing a distinct error). This also keeps "timeout vs. total deadline distinct"
+  (an explicit Task 6 test requirement) true: `E_FETCH_DEADLINE` remains reserved for the
+  top-of-page-loop budget check between pages; a retry-budget exhaustion mid-page never
+  produces it.
+- The mid-page retry-budget-exhaustion test needed to be deterministic without access to
+  `retryDelay`'s injectable `random` (which `fetchAll` intentionally never exposes through
+  adapter JSON, per section 4.2's "do not expose a fake clock or randomness in adapter JSON").
+  Solved by making the first attempt itself take longer than `max_duration_ms` (a
+  deliberately delayed server response, well inside `timeout_ms`), so remaining budget is
+  already negative by the time the retry decision runs — any non-negative computed wait
+  exceeds it regardless of jitter, without needing to control `Math.random()`.
+- `isRetryableError`'s HTTP-status check reads `err.details.fetch.status`, a new field added
+  to the `E_HTTP_STATUS` throw site specifically for this classification (via `fetchContext`
+  gaining an optional `extra` merge parameter) — additive only; no existing test asserts an
+  exact shape for `.details.fetch`, only named subfields like `.origin`.
+- Three existing Task 4/5 tests (`H03` pre-header-stall, `H03` mid-body-stall, `H04` secret
+  in a 500 response) and two in `fetch.test.mjs` (the fake `TimeoutError`/`DOMException` test,
+  and the DNS-failure secret-leak test) started incidentally exercising retries once E_TIMEOUT
+  and E_FETCH became retryable by default, since none of them had previously needed to say
+  anything about retry behavior. Each was given an explicit `retry: { max_attempts: 1 }`
+  opt-out, mirroring exactly how Task 5 gave transport-focused tests an explicit
+  `allow_truncation` opt-out for the same reason (an unrelated new default rippling into an
+  older test's assumptions) — not a weakening of any assertion, since every original
+  assertion is unchanged and still enforced.
+- `budget.bytes` (already threaded through every `readJsonBody` call across a whole
+  `fetchAll` invocation since Task 4) turned out to already satisfy "total consumed bytes
+  include bytes read from failed/retried attempts" with no new bookkeeping — swapping
+  `diagnostics.bytes` from a success-only running total to `budget.bytes` directly was the
+  entire fix.
+- `delay_ms` pacing and the retry backoff wait share the same `waitFor` primitive but are
+  applied at two different points: pacing runs once per page, only when the loop is actually
+  continuing to another page (not after the terminal page); retry backoff runs inside the
+  per-attempt loop, only between a failed attempt and the next one. Retries never increment
+  `pages`, so pacing cannot be miscounted as having occurred "per attempt".
+
+**Deviations from plan:** None identified.
+
 ## Task 4 — Enforce native body limits, timeouts, and safe failures
 
 **Date:** 2026-09-18

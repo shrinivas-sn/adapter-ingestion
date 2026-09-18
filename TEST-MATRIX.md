@@ -17,15 +17,15 @@ only — no scenario below is passed by plan inspection alone.
 | X01 | project | 2 | Mixed valid/invalid records | Mixed records retain valid rows with bounded actionable rejection samples. | test/extract.test.mjs | same as N01 | pass | |
 | F01 | project | 3 | Filter validation | Invalid filter rejected even on []; existing missing/array/empty semantics preserved. | test/filter.test.mjs | `node --test test/filter.test.mjs` | pass | |
 | H01 | project | 4 | Byte cap without Content-Length | Native chunked response without Content-Length is stopped by actual-byte cap. | test/integration.test.mjs | `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | pass | |
-| H02 | project | 4 | Decoded/total/record limits | Decoded compressed/total-byte/record limits enforced before excess retention. | test/integration.test.mjs, test/fetch.test.mjs | same as H01 | pass | Cumulative-across-retries evidence (vs. across-pages, proved here) is completed in Task 6. |
+| H02 | project | 4 | Decoded/total/record limits | Decoded compressed/total-byte/record limits enforced before excess retention. | test/integration.test.mjs, test/fetch.test.mjs | same as H01 | pass | Cumulative-across-retries evidence completed in Task 6 (see VERIFICATION.md). |
 | H03 | project | 4 | Stall/timeout/abort cleanup | Native header/body stalls terminate via timeout/deadline/abort and release resources. | test/integration.test.mjs | same as H01 | pass | |
 | H04 | project | 4 | Safe error projection | JSON/path/redirect errors safe; supplied secret absent from reports/CLI. | test/integration.test.mjs, test/fetch.test.mjs | same as H01 | pass | |
 | P01 | project | 5 | Unknown page size termination | Omitted per_page continues until []; known short-page/single-page cases correct. | test/fetch.test.mjs | `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | pass | |
 | P02 | project | 5 | Explicit truncation | Cap default fails with zero writes; explicit bounded window preserves complete:false. | test/fetch.test.mjs | same as P01 | pass | |
 | P03 | project | 5 | Repeat-page detection | Repeated page fails; normal overlapping IDs still dedupe last wins. | test/fetch.test.mjs | same as P01 | pass | |
-| R01 | project | 6 | Retryable status classification | 503->200 uses two attempts; 401/403/404/invalid JSON use one. | TBD (Task 6) | TBD | unproven | |
-| R02 | project | 6 | Retry-After handling | Retry-After seconds/date respected; excessive delay deferred; attempts/budget bounded. | TBD (Task 6) | TBD | unproven | |
-| R03 | project | 6 | Abort during wait / pacing | Abort during retry wait prevents next request; page pacing actually occurs. | TBD (Task 6) | TBD | unproven | |
+| R01 | project | 6 | Retryable status classification | 503->200 uses two attempts; 401/403/404/invalid JSON use one. | test/fetch.test.mjs, test/integration.test.mjs | `node --test test/fetch.test.mjs test/run.test.mjs test/integration.test.mjs` | pass | |
+| R02 | project | 6 | Retry-After handling | Retry-After seconds/date respected; excessive delay deferred; attempts/budget bounded. | test/fetch.test.mjs, test/integration.test.mjs | same as R01 | pass | |
+| R03 | project | 6 | Abort during wait / pacing | Abort during retry wait prevents next request; page pacing actually occurs. | test/fetch.test.mjs, test/integration.test.mjs | same as R01 | pass | |
 | S01 | project | 7 | Store iterator correctness | JSONL/CRLF/split UTF-8/final-line/no-file plus latest/index semantics. | TBD (Task 7) | TBD | unproven | |
 | S02 | project | 7 | Corrupt-line handling | Bad lines warn; large line fails early; non-ENOENT failures are visible. | TBD (Task 7) | TBD | unproven | |
 | S03 | project | 7 | Preflight/tail repair | Invalid batch writes zero; prior partial tail repair preserves old/new records. | TBD (Task 7) | TBD | unproven | |

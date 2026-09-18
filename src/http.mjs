@@ -57,3 +57,70 @@ export async function readJsonBody(response, { signal, maxResponseBytes, budget 
   }
   return { json, bytes };
 }
+
+// Retry-After is either an integer count of seconds or an HTTP-date (RFC
+// 7231 section 7.1.3). A past date collapses to 0 (retry now); anything that
+// is neither a valid integer nor a parseable date returns null so the caller
+// falls back to local exponential backoff instead of guessing.
+function parseRetryAfterMs(value, nowMs) {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  if (trimmed === '') return null;
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000;
+  const dateMs = Date.parse(trimmed);
+  if (Number.isNaN(dateMs)) return null;
+  return Math.max(0, dateMs - nowMs);
+}
+
+// Pure -- computes a delay without waiting, so it can be exhaustively unit
+// tested with injected nowMs/random. retryNumber starts at 1 for the first
+// retry (the attempt that just failed was attempt 1; this call is deciding
+// the wait before attempt 2).
+//
+// Full jitter: a random delay uniformly in [0, ceiling] rather than always
+// waiting the full exponential ceiling -- this is what actually prevents a
+// thundering herd of retrying clients from re-synchronizing on the same
+// wall-clock instants.
+//
+// A server-supplied Retry-After is a floor, never a ceiling this function
+// silently shortens ("never retry earlier than requested"): the returned
+// delay is max(jitter, retryAfterMs). If honoring it would need more time
+// than retry.max_delay_ms allows, the caller must fail loudly
+// (E_RETRY_DEFERRED) instead of either ignoring the server or waiting past
+// the configured ceiling.
+export function retryDelay({ retryNumber, backoffMs, maxDelayMs, retryAfter, nowMs = Date.now(), random = Math.random }) {
+  const ceiling = Math.min(maxDelayMs, backoffMs * 2 ** (retryNumber - 1));
+  const jitter = random() * ceiling;
+  const retryAfterMs = parseRetryAfterMs(retryAfter, nowMs);
+
+  if (retryAfterMs === null) {
+    return { delayMs: jitter, deferred: false, retryAfterMs: null };
+  }
+  if (retryAfterMs > maxDelayMs) {
+    return { delayMs: null, deferred: true, retryAfterMs };
+  }
+  return { delayMs: Math.max(jitter, retryAfterMs), deferred: false, retryAfterMs };
+}
+
+// Abortable delay for actual retry/pacing waits (as opposed to retryDelay's
+// pure arithmetic). Always removes its timer/listener on the way out so a
+// long-lived AbortSignal never accumulates dangling listeners across many
+// waits in one fetchAll call.
+export function waitFor(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new IngestionError('E_ABORTED', 'aborted while waiting'));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      reject(new IngestionError('E_ABORTED', 'aborted while waiting'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort);
+  });
+}
