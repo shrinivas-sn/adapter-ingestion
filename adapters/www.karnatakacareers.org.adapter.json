@@ -5,7 +5,7 @@
   "fetch": {
     "method": "GET",
     "headers": { "User-Agent": "adapter-ingestion-recipe/1.0" },
-    "pagination": { "style": "page-param", "param": "page", "per_page_param": "per_page", "per_page": 50, "max_pages": 5 }
+    "pagination": { "style": "page-param", "param": "page", "per_page_param": "per_page", "per_page": 50, "max_pages": 5, "allow_truncation": true }
   },
   "records_path": "$",
   "map": {

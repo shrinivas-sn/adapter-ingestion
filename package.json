@@ -4,7 +4,7 @@
   "description": "Generic fetch -> extract -> dedupe -> store pipeline for adapter-driven ingestion from sites with no API, plus a read-time relevance filter and a canary that flags a stale adapter when a source changes shape.",
   "type": "module",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.15.0"
   },
   "license": "MIT",
   "publishConfig": {
@@ -25,7 +25,8 @@
   "files": [
     "src",
     "README.md",
-    "NOTES-generalization.md"
+    "NOTES-generalization.md",
+    "MIGRATION-0.2.md"
   ],
   "exports": {
     ".": "./src/run.mjs",
@@ -41,7 +42,7 @@
     "./store": "./src/store.mjs"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test \"test/*.test.mjs\"",
     "ingest": "node src/run.mjs",
     "changeset": "changeset",
     "version": "changeset version",
