@@ -666,3 +666,119 @@ additionally reinforced at the full runIngest/store level (see TEST-MATRIX.md).
   existing Task 1–9 implementation.
 
 **Deviations from plan:** None identified.
+
+## Task 11 — Document the real API and verify the installed artifact on supported platforms
+
+**Date:** 2026-09-18
+**Revision:** `28a80de` (Task 10 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `README.md` fully rewritten (self-contained, runnable Quick Start using a local
+fixture `Response`; full public API reference with input/result/error per function; repo-
+maintainer-only content — the `generate-adapter` skill, `E:\dev-recipes` design authority —
+moved under a clearly labeled "Developing this repo" section, no longer implied as a
+package-user requirement). New `MIGRATION-0.2.md` covering exactly the compatibility-change
+list plan.md §3.2 names (Node floor, strict validation, pagination truncation, store
+locking, native-Response requirement, report v2 shape, corrupt-line handling, crash
+recovery). `package.json` (`engines.node` → `>=22.15.0`; `MIGRATION-0.2.md` added to
+`files`). `package-lock.json` reconciled via real `npm install` (root `version`/`engines`
+only — zero dependency version changes, diffed explicitly). New `scripts/verify-package.mjs`
+(packs the real tarball, installs it into a disposable consumer with
+`--ignore-scripts --omit=dev --package-lock=false --no-audit --no-fund`, runs a consumer
+script importing only the installed package's public subpaths, confirms every import
+resolves under `node_modules` via `import.meta.resolve`, drives a full
+first/replay/edit/broken-mapping/filter flow, and confirms no unexpected files were written
+by import/install alone). `src/run.mjs`'s CLI section rewritten: strict argv parsing
+(`parseCliArgs` — exactly one adapter path + optional `--since`, every other shape a named
+usage error), file/JSON-read errors caught and reduced to a one-line reason (never a raw
+stack trace or file-content snippet), a safe-host check before any path is derived from
+`adapter.host` (never a fabricated `runs/undefined` location), SIGINT/SIGTERM wired to an
+`AbortController` and registered/removed only inside the CLI invocation guard (never on
+library import), `process.exitCode` replacing every `process.exit()` call so in-flight I/O
+drains naturally. New `test/cli.test.mjs` (12 tests, real `child_process.spawn`, disposable
+cwd per test). `.github/workflows/ci.yml` (`workflow_call` added to `on:`; matrix
+`{ubuntu-latest, windows-latest} × {22.15.0, 22, 24}`; every cell runs `npm ci`/`npm test`/
+`node scripts/verify-package.mjs`; the scale-proof script runs once per OS, Node 24 only;
+failure evidence upload added). `.github/workflows/release.yml` (new `validate` job —
+`uses: ./.github/workflows/ci.yml` — with `release` gated on `needs: validate`; floating
+`npm install -g npm@latest` replaced with an exact pinned `npm@11.19.1`).
+`scripts/run-earthquake-{offline,broken}.mjs` needed no change — already native-Response
+and already time-safe (real wall-clock `now`, proven correct in Task 10).
+`TEST-MATRIX.md`/`STATUS.md` updated.
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/cli.test.mjs` | 0 | 12/12 (11 pass, 1 skip). | SIGINT graceful-abort test skipped on Windows (see below). |
+| `npm test` (full suite) | 0 | 281/281 (279 pass, 2 documented skips — the Task 8 symlink-privilege skip plus this task's new Windows-signal skip; 269 before this task + 12 new). | |
+| `node scripts/verify-package.mjs` | 0 | Real PASS: packed `shrinivas-sn-adapter-ingestion-0.1.0.tgz` (20 entries, matches `package.json` version 0.1.0, file allowlist exactly `LICENSE`/`MIGRATION-0.2.md`/`NOTES-generalization.md`/`README.md`/`package.json`/`src/**`), installed into a disposable consumer, all 11 public subpath imports resolved under `node_modules`, full first/replay/edit/broken-mapping/filter flow passed, zero unexpected files written by install/import alone. | |
+| README Quick Start example, extracted verbatim from `README.md` and run twice against the real installed tarball in a disposable consumer directory (not `src/`) | 0 (both runs) | Run 1: `{fetched:2,parsed:2,fresh:2,written:2}`, filter → `['Hello world']`, matching the doc exactly. Run 2 (replay): `{fresh:0,unchanged:2,written:0}`, matching the doc's stated replay claim exactly. | |
+| `npm ls --all` after `package-lock.json` reconciliation | 0 | Tree resolves cleanly, no warnings. | |
+| Dependency version diff (`package-lock.json`, before vs. after `npm install`) | — | `added: []`, `removed: []`, `version-changed: []` — only the root `version`/`engines` fields changed, exactly as required. | |
+| `gh api repos/actions/{checkout,setup-node,upload-artifact}/releases` | 0 | `actions/checkout@v7` (v7.0.1) and `actions/setup-node@v7` (v7.0.0) — both already-pinned majors confirmed still current, unchanged. `actions/upload-artifact` — newly added by this task; latest non-draft/non-prerelease is `v7.0.1`, not the `v4` an unverified guess would have used; pinned to `@v7`. | |
+| `npm view npm versions --json` (registry query, not memory) | 0 | Highest published npm 11.x is `11.19.1` (npm's own `latest` dist-tag has since moved to 12.0.2) — `release.yml`'s floating `npm@latest` replaced with this exact pinned version. | |
+| GitHub Actions `workflow_call` reusable-workflow syntax | — | Verified via `WebFetch` against `docs.github.com`'s own "Reusing workflows" page before writing `release.yml`'s `validate` job — see `E:\dev-recipes\_knowledge\cache\github-actions-reusable-workflows.md`. | |
+| `node --check` on every new/modified `.mjs` file; `yaml` package parse on both workflow files | 0 | Syntax/structure valid. | |
+| K03 (actual GitHub Actions run on the new matrix) | — | Not run this session — requires pushing/opening a PR, which is outside a local session's authority without explicit go-ahead. Everything checkable without that push (YAML validity, job wiring, action-version currency, local equivalents of every CI step) is verified above. | K03 stays `blocked` in TEST-MATRIX.md, not `pass` — matches plan.md's explicit "local success does not mark K03 passed." |
+
+**Scenario status:** K01, K02 — pass; K03 — blocked on an actual CI run (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- **`child_process.spawn('npm.cmd', ..., { shell: false })` throws `EINVAL` on this
+  Windows environment, verified empirically before writing `verify-package.mjs`** — Node
+  deliberately refuses to spawn a `.bat`/`.cmd` file at all without a shell, a defensive
+  change from the CVE-2024-27980 fix. `shell: true` is therefore required on Windows;
+  verified separately (a shell-metacharacter payload — `"`, `&`, `>` redirection — passed as
+  one array element under `shell:true` never broke out into real shell syntax, confirming an
+  *array* of arguments stays safe even under `shell:true`, unlike a concatenated string).
+  `verify-package.mjs` selects `npm.cmd`/`shell:true` on `win32` and `npm`/`shell:false`
+  everywhere else.
+- **`process.exitCode` (not `process.exit()`) is safe after a real network `fetch()` call**,
+  verified empirically first: a throwaway probe confirmed undici's client-side keep-alive
+  socket does not hold Node's event loop open once the fetch resolves (only an actively
+  `.listen()`-ing server does) — so removing every `process.exit()` call from the CLI in
+  favor of `process.exitCode` does not risk a hung process after a real ingest run.
+- **Windows cannot deliver a real signal to a spawned child process** — `child.kill('SIGINT')`/
+  `('SIGTERM')` against a Node child on Windows force-terminates immediately (`exit code
+  null`, `signal: 'SIGINT'`) without ever invoking the child's own `process.on('SIGINT', ...)`
+  handler, verified with a minimal throwaway probe before writing the CLI test. This is a
+  Node/Windows platform limitation (documented in Node's own child_process docs), not a gap
+  in this CLI: real interactive Ctrl+C on Windows, and any signal at all on Linux/macOS
+  (including via `child.kill()`), both work correctly. `test/cli.test.mjs`'s SIGINT test is
+  skipped on `win32` with an explicit reason, same pattern as the existing Task 8
+  symlink-privilege skip; CI's `ubuntu-latest` matrix cells exercise it for real.
+- **The `getPath`-based filter example initially failed** (`kept.length` was 0) because the
+  first draft used `field: 'title'` instead of `field: 'fields.title'` — a record's mapped
+  values live under `.fields`, not at the record's own top level. Caught immediately by
+  actually running `verify-package.mjs`'s consumer script rather than trusting the drafted
+  example; fixed in both the script and the README's own filter example before either was
+  considered done.
+- **`npm pack --json`'s real output shape was checked empirically** (`npm pack --json
+  --dry-run` against this exact package) before writing the manifest-inspection logic in
+  `verify-package.mjs`, rather than assumed from memory — confirmed exact field names
+  (`filename`, `files: [{path,size,mode}]`, `integrity`, `shasum`, `entryCount`).
+- **The README's Quick Start example was proven, not just written**: extracted verbatim
+  from the committed Markdown via a script (so the tested code can never silently drift
+  from the documented code) and run twice against a real installed tarball in a disposable
+  consumer directory outside this repo — both the first-run stage counts and the documented
+  replay claim (`fresh:0, unchanged:2, written:0`) matched exactly.
+- **CLI hardening found one genuine pre-existing defect, not just missing strictness**: the
+  original CLI never wrapped `JSON.parse(await readFile(adapterPath, ...))` in a try/catch
+  at all — a missing file or malformed JSON escaped as an *uncaught* top-level-await
+  rejection, printing Node's raw stack trace to stderr and exiting with whatever Node's
+  default uncaught-exception code is (1), not the documented usage/configuration exit code
+  (2). Fixed as part of this task's argv/file-handling hardening, not treated as a separate
+  regression, since Task 11 is exactly the task that specifies this exit-code contract.
+- **A safe-host check was added before path derivation** specifically because, without it,
+  an adapter JSON with a missing/non-string `host` would have let the CLI's own `runs/
+  ${adapter.host}` template literal build a literal `runs/undefined` path — `runIngest`'s
+  own `validateAdapter` would still correctly reject the adapter, but only *after* a
+  nonsensical report directory had already been derived and handed to it. The new check
+  fails before `runIngest` is ever called, so no such directory is created.
+- **`.github/workflows/*.yml` changes were locally validated as thoroughly as a local
+  session can** — YAML parsing, job/`needs`/`uses` wiring, and every referenced action's
+  current major version were all checked against real sources (the GitHub API for action
+  releases, `docs.github.com` for `workflow_call` syntax, the npm registry for the pinned
+  npm version) — but an actual GitHub Actions run was deliberately not triggered this
+  session; see K03 in TEST-MATRIX.md.
+
+**Deviations from plan:** None identified.

@@ -14,7 +14,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Gates publication on the exact same OS/Node matrix + package verification
+  # every PR already has to pass -- not just an Ubuntu unit-test run. A red
+  # matrix cell here blocks release the same as a red `npm test`.
+  validate:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,9 +32,12 @@ jobs:
           registry-url: "https://registry.npmjs.org"
           cache: "npm"
 
-      # Trusted publishing needs npm CLI >=11.5.1; don't rely on whatever
-      # setup-node's bundled npm happens to be.
-      - run: npm install -g npm@latest
+      # Trusted publishing needs npm CLI >=11.5.1. Pinned to an exact
+      # verified npm 11 release (11.19.1 -- the newest published npm 11.x,
+      # confirmed against the real npm registry on 2026-09-18; npm's own
+      # "latest" dist-tag has since moved to 12.x, which this pin
+      # deliberately does not track yet -- see VERIFICATION.md Task 11).
+      - run: npm install -g npm@11.19.1
 
       - run: npm ci
 

@@ -284,7 +284,7 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, now 
   }
 }
 
-// CLI: node src/run.mjs adapters/<HOST>.adapter.json [--since YYYY-MM-DD]
+// CLI: node src/run.mjs <adapter.json> [--since YYYY-MM-DD]
 // import.meta.url is always an absolute file:// URL; process.argv[1] is a
 // plain path that Node does NOT absolutize, and on Windows uses backslashes
 // with no leading slash -- a naive `file://${argv[1]}` comparison never
@@ -294,24 +294,97 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, now 
 //
 // Exit codes (section 6.2): 0 outcome ok; 1 stale/operational error/aborted;
 // 2 usage/configuration (the run never got past validating options/adapter).
-// Full argv hardening and signal handling are Task 11's job -- this is the
-// outcome-to-exit-code mapping this task's lifecycle model requires.
 const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID']);
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const adapterPath = process.argv[2];
-  if (!adapterPath) { console.error('usage: node src/run.mjs <adapter.json> [--since YYYY-MM-DD]'); process.exit(2); }
-  const sinceIdx = process.argv.indexOf('--since');
-  const adapter = JSON.parse(await readFile(adapterPath, 'utf8'));
+const USAGE = 'usage: node src/run.mjs <adapter.json> [--since YYYY-MM-DD]';
+
+// Exactly one positional path plus an optional --since <value>. Everything
+// else (missing path, extra positional, duplicate/valueless --since, any
+// unrecognized flag) is a usage error, not silently ignored.
+function parseCliArgs(args) {
+  let adapterPath;
+  let since;
+  let sinceSeen = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === '--since') {
+      if (sinceSeen) return { usageError: '--since may only be given once' };
+      sinceSeen = true;
+      i++;
+      if (i >= args.length) return { usageError: '--since requires a value' };
+      since = args[i];
+    } else if (arg.startsWith('--')) {
+      return { usageError: `unknown flag: ${arg}` };
+    } else if (adapterPath !== undefined) {
+      return { usageError: `unexpected extra argument: ${arg}` };
+    } else {
+      adapterPath = arg;
+    }
+  }
+  if (adapterPath === undefined) return { usageError: 'an adapter.json path is required' };
+  return { adapterPath, since };
+}
+
+async function runCli(argv) {
+  const parsed = parseCliArgs(argv);
+  if (parsed.usageError) {
+    console.error(`${USAGE}\n${parsed.usageError}`);
+    return 2;
+  }
+  const { adapterPath, since } = parsed;
+
+  let adapter;
+  try {
+    adapter = JSON.parse(await readFile(adapterPath, 'utf8'));
+  } catch (err) {
+    // Never a raw stack trace, and never a snippet of the file's own content
+    // (a JSON SyntaxError's message can otherwise embed one) -- just which
+    // of the two things failed.
+    const reason = err.code === 'ENOENT' ? 'file not found'
+      : err.code === 'EACCES' ? 'permission denied'
+      : err instanceof SyntaxError ? 'not valid JSON'
+      : 'could not be read';
+    console.error(`failed to load adapter "${adapterPath}": ${reason}`);
+    return 2;
+  }
+
+  // A safe host is required before any path is derived from it -- an
+  // invalid/missing host must never produce a fabricated `runs/undefined`
+  // (or similar) report location. The full hostname-safety check still
+  // belongs to validateAdapter/runIngest; this only guards the CLI's own
+  // string interpolation into a default path.
+  if (typeof adapter?.host !== 'string' || adapter.host.length === 0) {
+    console.error(`adapter "${adapterPath}" has no usable "host" -- refusing to derive a store/report path from it`);
+    return 2;
+  }
+
+  // Registered only for the duration of this run, never at module import --
+  // a library consumer importing run.mjs must never get process-wide signal
+  // handlers installed as a side effect.
+  const ac = new AbortController();
+  const onSignal = () => ac.abort();
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
   try {
     const { report, canary } = await runIngest({
       adapter,
       paths: { storeFile: `store/${adapter.host}.jsonl`, runsDir: `runs/${adapter.host}` },
-      since: sinceIdx > -1 ? process.argv[sinceIdx + 1] : undefined,
+      since,
+      signal: ac.signal,
     });
     console.log(JSON.stringify({ report: { outcome: report.outcome, stages: report.stages }, canary }, null, 2));
-    process.exit(report.outcome === 'ok' ? 0 : 1);
+    return report.outcome === 'ok' ? 0 : 1;
   } catch (err) {
     console.error(`ingest failed: ${err.message}`);
-    process.exit(CONFIG_ERROR_CODES.has(err.code) ? 2 : 1);
+    return CONFIG_ERROR_CODES.has(err.code) ? 2 : 1;
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
   }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // exitCode, not exit() -- lets any already-scheduled I/O (a report write in
+  // flight) finish draining naturally instead of being truncated, on every
+  // exit path including a SIGINT/SIGTERM-triggered abort above.
+  process.exitCode = await runCli(process.argv.slice(2));
 }

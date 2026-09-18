@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -11,15 +12,39 @@ concurrency:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: ["22.15.0", "22", "24"]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "24"
-          registry-url: "https://registry.npmjs.org"
+          node-version: ${{ matrix.node-version }}
           cache: "npm"
 
       - run: npm ci
       - run: npm test
+      - run: node scripts/verify-package.mjs
+
+      # Once per OS is enough proof of the bounded-memory claim -- Node
+      # version doesn't change what's being measured (V8 heap behavior
+      # under a fixed --max-old-space-size), so running it on every matrix
+      # cell would be redundant cost, not additional evidence.
+      - name: Scale proof (once per OS, Node 24 only)
+        if: matrix.node-version == '24'
+        run: node scripts/verify-store-scale.mjs
+
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: failure-${{ matrix.os }}-node${{ matrix.node-version }}
+          path: |
+            store/
+            runs/
+          if-no-files-found: ignore
+          retention-days: 7
