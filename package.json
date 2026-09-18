@@ -41,7 +41,7 @@
     "./store": "./src/store.mjs"
   },
   "scripts": {
-    "test": "node --test",
+    "test": "node --test \"test/*.test.mjs\"",
     "ingest": "node src/run.mjs",
     "changeset": "changeset",
     "version": "changeset version",
