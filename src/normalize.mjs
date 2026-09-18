@@ -58,3 +58,22 @@ export function applyNormalizer(name, value) {
   if (!fn) throw new Error(`unknown normalizer: ${name}`);
   return fn(value);
 }
+
+function isLeapYear(year) {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+// Shared by config.mjs (validating `since`) and, later, canary staleness
+// parsing -- one calendar-correctness check, not a second date parser.
+function isValidCalendarDate(year, month, day) {
+  if (month < 1 || month > 12) return false;
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  return day >= 1 && day <= daysInMonth[month - 1];
+}
+
+export function isValidDateOnly(value) {
+  if (typeof value !== 'string') return false;
+  const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  return isValidCalendarDate(Number(m[1]), Number(m[2]), Number(m[3]));
+}

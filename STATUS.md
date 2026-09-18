@@ -5,11 +5,12 @@ As of 2026-09-18. Current code baseline: `179e5f4` (docs commit). Execution bran
 
 ## Next up (start here)
 
-**Task 0 is complete.** Read [plan.md](plan.md) Task 1, then execute it: `src/config.mjs`,
-`src/errors.mjs` (new); modify `src/adapter.mjs`, `src/contract.mjs`, `src/extract.mjs`.
-Start with the malformed-input table tests and the unconditional-identity regression in
-plan.md Task 1. Work sequentially through Tasks 1–12, one commit per completed task on
-`release/0.2.0-reliability`.
+**Tasks 0–1 are complete.** Read [plan.md](plan.md) Task 2, then execute it: rewrite
+`src/normalize.mjs`'s numeric-entity/date grammar (section 4.4) and extend
+`extractAll`/`verifyAgainstFixtures` with `errorCount`/`fieldFailures` diagnostics
+(section 6.1 interfaces) in `src/extract.mjs`/`src/adapter.mjs`. Start with the bad
+numeric-entity/impossible-date regression test in plan.md Task 2. Work sequentially
+through Tasks 2–12, one commit per completed task on `release/0.2.0-reliability`.
 
 ## Current state
 
@@ -21,12 +22,18 @@ plan.md Task 1. Work sequentially through Tasks 1–12, one commit per completed
 - Recorded fixtures: USGS **5/5**, Karnataka Careers **6/6** extracted successfully. These are historical offline fixtures, not current live-source proof.
 - Workspace owner verified: `SSN-INSPIRON-35\Dell`.
 - Task 0 changes: `package.json` test script; new `test/helpers/fixtures.mjs`,
-  `TEST-MATRIX.md` (38 rows, all unproven), `VERIFICATION.md`. No other production/test code
-  changed.
+  `TEST-MATRIX.md` (38 rows, all unproven), `VERIFICATION.md`.
+- Task 1 changes: new `src/config.mjs` (full section 3.4 adapter/fetch config validation),
+  `src/errors.mjs` (`IngestionError`); `src/adapter.mjs` now delegates to
+  `validateAdapterConfig`; `src/contract.mjs` enforces identity/URL invariants and iterative
+  JSON-safety (bounded depth 100, cycle detection); `src/extract.mjs`'s `getPath` is
+  own-property-only; `src/normalize.mjs` gained `isValidDateOnly`. 109/109 full suite passes
+  (66 baseline + 43 new). V01–V04 proved in TEST-MATRIX.md.
 
 ## Pending
 
-- Implementation tasks **1–12** and all 38 scenario proofs remain pending (unproven in TEST-MATRIX.md).
+- Implementation tasks **2–12** and 34 of 38 scenario proofs remain pending (V01–V04 proved;
+  see TEST-MATRIX.md).
 - Key defects: pagination cutoff, mandatory identity, actual response limits, invalid entities/dates/config/filters, whole-file store reads, missing run exclusion, and incomplete saved reports.
 - package-lock.json root metadata is **0.0.0**, while package.json is **0.1.0**. Task 11 reconciles metadata; do not mass-update dependencies.
 - Current CI only tests Ubuntu / Node 24. Planned support proof covers Linux and Windows with Node 22.15.0, 22, and 24.

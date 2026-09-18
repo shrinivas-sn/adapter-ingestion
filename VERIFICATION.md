@@ -25,3 +25,45 @@ rows `unproven`.
 
 **Deviations from plan:** None. package.json test script changed exactly as specified.
 No production source touched.
+
+## Task 1 — Validate configuration and enforce record identity
+
+**Date:** 2026-09-18
+**Revision:** `7cb16e5` (Task 0 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** new `src/config.mjs`, `src/errors.mjs`; modified `src/adapter.mjs` (delegates to
+`validateAdapterConfig`), `src/contract.mjs` (identity/URL invariants, iterative JSON-safety
+check replacing the old recursive `assertNoUndefined`), `src/extract.mjs` (own-property-only
+`getPath`, unconditional source_id/url checks folded into `missing`, `buildRecord` failures
+caught per-record); `src/normalize.mjs` (added `isValidDateOnly` — internal export, not a
+new package subpath). Test files extended: `test/adapter.test.mjs`, `test/contract.test.mjs`,
+`test/extract.test.mjs`.
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/adapter.test.mjs test/contract.test.mjs test/extract.test.mjs` | 0 | 64/64 pass (21 before this task, confirmed via `git stash`; +43 new tests). | |
+| `npm test` (full suite) | 0 | 109/109 pass (66 baseline + 43 new). | |
+| `node -e` script validating both real adapters + example.adapter.json against `validateAdapter` | 0 | `earthquake.usgs.gov` → ok:true; `www.karnatakacareers.org` → ok:true; `example.adapter.json` → ok:false (`<HOST>` correctly rejected as not a bare hostname, `<PATH>` URL invalid). | Matches plan.md instruction: template stays intentionally invalid. |
+
+**Scenario status:** V01, V02, V03, V04 — pass (see TEST-MATRIX.md). X01/N01/N02 remain
+Task 2's responsibility (extractAll's `errorCount`/`fieldFailures` diagnostics are not yet
+added; Task 1 kept the existing `{index, missing}` error shape).
+
+**Notable implementation decisions (not deviations, but worth recording):**
+- `access.kind` is now restricted to `json-api` only (was previously `json-api`/`feed`/
+  `html`/`browser`) — this resolves B08's validation-layer half (fetch-layer enforcement is
+  still Task 4/H04). No existing adapter or test used the other three kinds.
+- Windows reserved-device-basename check tests only the host string's first dot-separated
+  label (`CON.example.com` → basename `CON` → rejected), matching how Windows determines
+  filename validity for a single path component containing dots.
+- `assertNoUndefined` was extended in place (same export, same signature, same message
+  format for the undefined case) rather than adding a parallel function, since its existing
+  direct tests only exercise the undefined case and the new checks are supersets that don't
+  change that behavior.
+- Existing error-message fragments relied on by the pre-Task-1 test suite
+  (`/bare hostname/`, `/hostname must equal/`, `/must both be set or both omitted/`,
+  `/must name a field in map/`, `/unknown key/`, `/ghost/`, `/url/`, `/normalizer/i`,
+  `/http/`) were preserved verbatim — confirmed by the full suite staying green.
+
+**Deviations from plan:** None identified.

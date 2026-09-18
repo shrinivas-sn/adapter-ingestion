@@ -8,10 +8,10 @@ only — no scenario below is passed by plan inspection alone.
 
 | ID | Origin | Task | Scenario | Must prove | Test/script | Command | Status | Limitation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| V01 | project | 1 | Malformed adapter input | Malformed input returns validation errors without incidental throws or fetching. | TBD (Task 1) | TBD | unproven | |
-| V02 | project | 1 | Invalid execution settings rejected | Invalid limits/styles/kinds/methods/headers/ratios rejected; real adapters validate. | TBD (Task 1) | TBD | unproven | |
-| V03 | project | 1 | Unconditional identity/URL | ID/URL unconditional; zero ID and false ordinary fields survive. | TBD (Task 1) | TBD | unproven | |
-| V04 | project | 1 | Own-property paths only | No inherited traversal/prototype mutation; numeric/colon paths work. | TBD (Task 1) | TBD | unproven | |
+| V01 | project | 1 | Malformed adapter input | Malformed input returns validation errors without incidental throws or fetching. | test/adapter.test.mjs (malformed-input table) | `node --test test/adapter.test.mjs test/contract.test.mjs test/extract.test.mjs` | pass | |
+| V02 | project | 1 | Invalid execution settings rejected | Invalid limits/styles/kinds/methods/headers/ratios rejected; real adapters validate. | test/adapter.test.mjs; adapters/*.adapter.json validated via node -e | same as V01, plus manual `validateAdapter` check against both real adapter JSON files | pass | |
+| V03 | project | 1 | Unconditional identity/URL | ID/URL unconditional; zero ID and false ordinary fields survive. | test/extract.test.mjs, test/contract.test.mjs | same as V01 | pass | |
+| V04 | project | 1 | Own-property paths only | No inherited traversal/prototype mutation; numeric/colon paths work. | test/extract.test.mjs, test/adapter.test.mjs | same as V01 | pass | |
 | N01 | project | 2 | Numeric entity safety | Numeric entity correctness; huge/invalid/surrogate/zero references cannot throw. | TBD (Task 2) | TBD | unproven | |
 | N02 | project | 2 | Date/time correctness | Leap/date/time checks and written-date timezone behavior; finite number compatibility. | TBD (Task 2) | TBD | unproven | |
 | X01 | project | 2 | Mixed valid/invalid records | Mixed records retain valid rows with bounded actionable rejection samples. | TBD (Task 2) | TBD | unproven | |
