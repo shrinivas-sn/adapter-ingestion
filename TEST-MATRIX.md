@@ -12,9 +12,9 @@ only — no scenario below is passed by plan inspection alone.
 | V02 | project | 1 | Invalid execution settings rejected | Invalid limits/styles/kinds/methods/headers/ratios rejected; real adapters validate. | test/adapter.test.mjs; adapters/*.adapter.json validated via node -e | same as V01, plus manual `validateAdapter` check against both real adapter JSON files | pass | |
 | V03 | project | 1 | Unconditional identity/URL | ID/URL unconditional; zero ID and false ordinary fields survive. | test/extract.test.mjs, test/contract.test.mjs | same as V01 | pass | |
 | V04 | project | 1 | Own-property paths only | No inherited traversal/prototype mutation; numeric/colon paths work. | test/extract.test.mjs, test/adapter.test.mjs | same as V01 | pass | |
-| N01 | project | 2 | Numeric entity safety | Numeric entity correctness; huge/invalid/surrogate/zero references cannot throw. | TBD (Task 2) | TBD | unproven | |
-| N02 | project | 2 | Date/time correctness | Leap/date/time checks and written-date timezone behavior; finite number compatibility. | TBD (Task 2) | TBD | unproven | |
-| X01 | project | 2 | Mixed valid/invalid records | Mixed records retain valid rows with bounded actionable rejection samples. | TBD (Task 2) | TBD | unproven | |
+| N01 | project | 2 | Numeric entity safety | Numeric entity correctness; huge/invalid/surrogate/zero references cannot throw. | test/normalize.test.mjs | `node --test test/normalize.test.mjs test/extract.test.mjs test/adapter.test.mjs` | pass | |
+| N02 | project | 2 | Date/time correctness | Leap/date/time checks and written-date timezone behavior; finite number compatibility. | test/normalize.test.mjs | same as N01 | pass | |
+| X01 | project | 2 | Mixed valid/invalid records | Mixed records retain valid rows with bounded actionable rejection samples. | test/extract.test.mjs | same as N01 | pass | |
 | F01 | project | 3 | Filter validation | Invalid filter rejected even on []; existing missing/array/empty semantics preserved. | TBD (Task 3) | TBD | unproven | |
 | H01 | project | 4 | Byte cap without Content-Length | Native chunked response without Content-Length is stopped by actual-byte cap. | TBD (Task 4) | TBD | unproven | |
 | H02 | project | 4 | Decoded/total/record limits | Decoded compressed/total-byte/record limits enforced before excess retention. | TBD (Task 4, cumulative-retry part completed Task 6) | TBD | unproven | |

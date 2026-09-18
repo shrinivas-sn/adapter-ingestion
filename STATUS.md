@@ -5,12 +5,12 @@ As of 2026-09-18. Current code baseline: `179e5f4` (docs commit). Execution bran
 
 ## Next up (start here)
 
-**Tasks 0–1 are complete.** Read [plan.md](plan.md) Task 2, then execute it: rewrite
-`src/normalize.mjs`'s numeric-entity/date grammar (section 4.4) and extend
-`extractAll`/`verifyAgainstFixtures` with `errorCount`/`fieldFailures` diagnostics
-(section 6.1 interfaces) in `src/extract.mjs`/`src/adapter.mjs`. Start with the bad
-numeric-entity/impossible-date regression test in plan.md Task 2. Work sequentially
-through Tasks 2–12, one commit per completed task on `release/0.2.0-reliability`.
+**Tasks 0–2 are complete.** Read [plan.md](plan.md) Task 3, then execute it: add
+`validateFilter` to `src/filter.mjs` per section 3.5 (unknown-key/operand checks; empty
+`all`/`any` semantics preserved; `applyFilter` validates once, `evaluateRule` validates its
+own rule). Start with the invalid-mode-on-empty-store regression test in plan.md Task 3.
+Work sequentially through Tasks 3–12, one commit per completed task on
+`release/0.2.0-reliability`.
 
 ## Current state
 
@@ -27,13 +27,19 @@ through Tasks 2–12, one commit per completed task on `release/0.2.0-reliabilit
   `src/errors.mjs` (`IngestionError`); `src/adapter.mjs` now delegates to
   `validateAdapterConfig`; `src/contract.mjs` enforces identity/URL invariants and iterative
   JSON-safety (bounded depth 100, cycle detection); `src/extract.mjs`'s `getPath` is
-  own-property-only; `src/normalize.mjs` gained `isValidDateOnly`. 109/109 full suite passes
-  (66 baseline + 43 new). V01–V04 proved in TEST-MATRIX.md.
+  own-property-only; `src/normalize.mjs` gained `isValidDateOnly`. V01–V04 proved.
+- Task 2 changes: `src/normalize.mjs`'s `text`/`number`/`iso-date` rewritten per section 4.4
+  (numeric entities never throw; overflow-to-Infinity caught; iso-date is a hand-validated
+  grammar, no `Date` parsing, full calendar/leap-year checks, offset timestamps retain the
+  written date); `src/extract.mjs`'s `extractAll` now returns `errorCount`/`fieldFailures`
+  over all rejected records with `errors` capped at 20 safe/bounded samples split into
+  `missing` vs `invalid`; `src/adapter.mjs`'s `verifyAgainstFixtures` reads the full
+  counters. 132/132 full suite passes (109 + 23 new). N01/N02/X01 proved.
 
 ## Pending
 
-- Implementation tasks **2–12** and 34 of 38 scenario proofs remain pending (V01–V04 proved;
-  see TEST-MATRIX.md).
+- Implementation tasks **3–12** and 31 of 38 scenario proofs remain pending (V01–V04, N01,
+  N02, X01 proved; see TEST-MATRIX.md).
 - Key defects: pagination cutoff, mandatory identity, actual response limits, invalid entities/dates/config/filters, whole-file store reads, missing run exclusion, and incomplete saved reports.
 - package-lock.json root metadata is **0.0.0**, while package.json is **0.1.0**. Task 11 reconciles metadata; do not mass-update dependencies.
 - Current CI only tests Ubuntu / Node 24. Planned support proof covers Linux and Windows with Node 22.15.0, 22, and 24.

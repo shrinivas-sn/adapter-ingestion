@@ -6,10 +6,11 @@ export function validateAdapter(adapter) {
 }
 
 export function verifyAgainstFixtures(adapter, fixtureItems) {
-  const { records, errors } = extractAll(fixtureItems, adapter,
+  // Uses extractAll's full counters, not its (now capped at 20) error
+  // samples — a fixture set larger than the sample cap must still report
+  // an accurate ratio and complete per-field failure breakdown.
+  const { records, fieldFailures } = extractAll(fixtureItems, adapter,
     { fetchedAt: new Date(0).toISOString() });
-  const fieldFailures = {};
-  for (const e of errors) for (const f of e.missing) fieldFailures[f] = (fieldFailures[f] ?? 0) + 1;
   const total = fixtureItems.length;
   return { total, parsed: records.length, ratio: total ? records.length / total : 0, fieldFailures };
 }

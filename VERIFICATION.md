@@ -67,3 +67,47 @@ added; Task 1 kept the existing `{index, missing}` error shape).
   `/http/`) were preserved verbatim — confirmed by the full suite staying green.
 
 **Deviations from plan:** None identified.
+
+## Task 2 — Normalize bad source values and improve extraction diagnostics
+
+**Date:** 2026-09-18
+**Revision:** `964c830` (Task 1 commit) → this task, on `release/0.2.0-reliability`
+**Platform / runtime:** Windows 11 / Node v22.15.0 / npm 10.9.2
+
+**Files:** `src/normalize.mjs` (rewrote `text`'s numeric-entity decode to never throw and
+route zero/surrogate/overflow to U+FFFD; fixed `number` to reject overflow-to-Infinity;
+rewrote `iso-date` as an explicit hand-validated grammar — no `Date` parsing — covering ISO
+timestamps with offsets, English day-month-year, and numeric day-first, with full calendar
+validation via the `isValidCalendarDate` helper added in Task 1); `src/extract.mjs`
+(`extractAll` now returns `errorCount` and `fieldFailures` computed over *all* rejected
+records, caps `errors` samples at 20, and splits each failure into `missing` vs `invalid`
+field names with bounded/safe `source_id`/`source_url` diagnostics — no raw content, no
+credentials/query/fragment); `src/adapter.mjs` (`verifyAgainstFixtures` now reads
+`fieldFailures` from extractAll's full counters instead of re-deriving from the capped
+`errors` sample). Test files extended: `test/normalize.test.mjs`, `test/extract.test.mjs`,
+`test/adapter.test.mjs` (unchanged this task — no config-layer normalizer surface).
+
+| Command | Exit | Result | Limitation |
+| --- | --- | --- | --- |
+| `node --test test/normalize.test.mjs test/extract.test.mjs test/adapter.test.mjs test/contract.test.mjs` | 0 | 93/93 pass (70 before this task, confirmed via `git stash`; +23 new tests). | |
+| `npm test` (full suite) | 0 | 132/132 pass (109 before + 23 net new). | |
+| `node -e` script re-running `verifyAgainstFixtures` against both real adapters' recorded fixtures | 0 | `earthquake.usgs.gov` → 5/5, `{}` field failures; `www.karnatakacareers.org` → 6/6, `{}` field failures — unchanged from Task 0/1 baseline despite the `iso-date`/`number` rewrite. | |
+
+**Scenario status:** N01, N02, X01 — pass (see TEST-MATRIX.md).
+
+**Notable implementation decisions:**
+- Full month names (e.g. "September") were already silently accepted by the pre-Task-2 code
+  via an unbounded `slice(0,3)` prefix trick, which also wrongly accepted garbage words
+  sharing a month's first 3 letters (e.g. "Septemberish"). Task 2 replaces this with an
+  explicit short/full name list requiring an exact case-insensitive match.
+- The Task-1-authored extract test `'an invalid source_url (bad protocol) is reported even
+  when url is not in required'` asserted the bad URL landed in `missing`. Task 2 introduces
+  the missing/invalid split from section 4.5, so a present-but-malformed URL is now correctly
+  `invalid`, not `missing`. Updated in place (not a regression — a refinement this task
+  explicitly introduces) and renamed to make the distinction explicit.
+- `code` on an error entry is `'E_RECORD_INVALID'` for classification failures (missing/
+  invalid identity or required fields) and the thrown `IngestionError`'s own code for a
+  `buildRecord` rejection (currently always `E_RECORD_INVALID` too, since that's the only
+  code `buildRecord` throws as of Task 1).
+
+**Deviations from plan:** None identified.
