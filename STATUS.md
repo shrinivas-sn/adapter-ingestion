@@ -34,12 +34,12 @@ repo is **public** since 01/10/2026; gitleaks 8.30.1 found 0 leaks across all 45
 
 ## Next up (start here)
 
-1. The owner opens the session with their own wishlist for the package. Brainstorm v0.3.0
-   (`superpowers:brainstorming`, then `create-plan`) from that wishlist, `RFC-0.3.md` and the
-   open gaps above. Prove each gap with 2 real APIs first. RFC ideas to test:
-   - explicit `records_shape: "object_values"`;
-   - `template` returns null when a var is missing;
-   - check whether 0.2.0 rejects unknown adapter fields before choosing adapter `version`.
+1. Brainstorm verdict logged 2026-10-01: `brainstorm/brainstorm-2026-10-01-product-roadmap.md`
+   (foundation-first: 0.3.0 self-describing + upgrade-safe -> 0.4.0 extension points ->
+   0.5.0 ecosystem -> 1.0.0). The owner answers its 4 "Open decisions" one at a time, then:
+   design sections for 0.3.0 -> written spec -> `create-plan`. No implementation before that.
+   - RFC-0.3 Gap A (object_values) parked, 0 real sources; Gap B (template) parked, 1 of 2.
+   - Answered: 0.2.0 rejects unknown adapter keys (`src/config.mjs:41`).
 2. Merge or PR `feat/github-advisories-adapter` when the owner asks.
 
 ## Pending
