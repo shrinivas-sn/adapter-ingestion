@@ -34,9 +34,12 @@ After bumping, read `notices` in the first run report, or run
 
 - Every run report has a new `notices` array: advice (`A_*`) about what this version offers
   your adapter, and deprecations (`D_*`). Notices never change a run's outcome or exit code.
-  `report_version` stays `2`.
+  `report_version` stays `2`. The first advice code is `A_CANARY_NO_HISTORY`: the
+  `count_drop_ratio` check had no past runs to compare with.
 - TypeScript types for every subpath, plus type exports (`RunIngestOptions`, `Report`,
   `Notice`, ...) from the root module. The runtime is unchanged plain JavaScript.
+- New docs shipped in the package: `AGENTS.md` (recipes for coding agents), `llms.txt`,
+  `VERSIONING.md` (what each release may change) and this file.
 
 ### Opt in
 
