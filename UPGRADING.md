@@ -35,6 +35,8 @@ After bumping, read `notices` in the first run report, or run
 - Every run report has a new `notices` array: advice (`A_*`) about what this version offers
   your adapter, and deprecations (`D_*`). Notices never change a run's outcome or exit code.
   `report_version` stays `2`.
+- TypeScript types for every subpath, plus type exports (`RunIngestOptions`, `Report`,
+  `Notice`, ...) from the root module. The runtime is unchanged plain JavaScript.
 
 ### Opt in
 

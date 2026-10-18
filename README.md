@@ -154,6 +154,12 @@ appended to `store/example.test.jsonl`.
 Every function below has a stable input/output/error contract. `error.code` is always one
 of the `E_*` constants named per function.
 
+TypeScript types ship with the package (since 0.4): each subpath resolves its own `.d.mts`
+through `exports`, generated from the source's JSDoc, so editors and agents see real
+signatures instead of `any`. The root module also exports the main shapes as types:
+`import type { RunIngestOptions, RunResult, Report, Notice, Adapter, StoreRecord, Kind } from '@shrinivas-sn/adapter-ingestion'`.
+The package itself is still plain JavaScript with no runtime dependencies.
+
 **Root (`@shrinivas-sn/adapter-ingestion`)**
 - `runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store })` →
   `Promise<{ report, canary }>` on success (including a `stale` canary — that's not a
