@@ -1,4 +1,9 @@
 export class IngestionError extends Error {
+  /**
+   * @param {string} code
+   * @param {string} message
+   * @param {{ cause?: any, details?: any }} [options]
+   */
   constructor(code, message, { cause, details } = {}) {
     super(message, cause !== undefined ? { cause } : undefined);
     this.name = 'IngestionError';

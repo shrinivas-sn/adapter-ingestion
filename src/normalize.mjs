@@ -14,6 +14,10 @@ function isValidCalendarDate(year, month, day) {
   return day >= 1 && day <= daysInMonth[month - 1];
 }
 
+/**
+ * @param {any} value
+ * @returns {boolean}
+ */
 export function isValidDateOnly(value) {
   if (typeof value !== 'string') return false;
   const m = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -150,6 +154,11 @@ function bool(v) {
 
 const NORMALIZERS = { text, number, 'iso-date': isoDate, bool };
 
+/**
+ * @param {'text'|'number'|'iso-date'|'bool'} name
+ * @param {any} value
+ * @returns {any}
+ */
 export function applyNormalizer(name, value) {
   const fn = NORMALIZERS[name];
   if (!fn) throw new Error(`unknown normalizer: ${name}`);

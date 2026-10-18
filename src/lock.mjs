@@ -69,6 +69,13 @@ async function releaseLock(lockPath, runId) {
 // always an immediate E_STORE_LOCKED, and only an operator's explicit,
 // out-of-band recovery (removing the .lock file after confirming the owner
 // is really gone) can ever clear one left behind by a crash.
+/**
+ * @template T
+ * @param {string} filePath
+ * @param {{ runId?: string }} options
+ * @param {(canonicalStoreFile: string) => Promise<T>} callback
+ * @returns {Promise<T>}
+ */
 export async function withStoreLock(filePath, { runId } = {}, callback) {
   if (typeof filePath !== 'string' || filePath.length === 0) {
     throw new IngestionError('E_OPTIONS', 'withStoreLock requires a nonempty store file path');

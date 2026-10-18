@@ -5,6 +5,11 @@ import { IngestionError } from './errors.mjs';
 import { requestPage } from './fetch/request.mjs';
 import { resolveKind, validateKindsOption, BUILTIN_KINDS } from './kinds/index.mjs';
 
+/**
+ * @param {import('./types.mjs').Adapter} adapter
+ * @param {{ page?: number, since?: string }} [options]
+ * @returns {string}
+ */
 export function buildUrl(adapter, { page, since } = {}) {
   const url = new URL(adapter.access.url);
   const p = adapter.fetch?.pagination;
@@ -24,6 +29,11 @@ function digestBatch(batch) {
   return createHash('sha256').update(JSON.stringify(batch)).digest('hex');
 }
 
+/**
+ * @param {import('./types.mjs').Adapter} adapter
+ * @param {{ since?: string, fetchImpl?: typeof fetch, signal?: AbortSignal, kinds?: Record<string, import('./types.mjs').Kind> }} [options]
+ * @returns {Promise<{ items: any[], pages: number, statuses: number[], diagnostics: any }>}
+ */
 export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds } = {}) {
   validateKindsOption(kinds);
   const p = adapter.fetch?.pagination;

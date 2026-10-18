@@ -26,6 +26,18 @@ const KNOWN_CANARY_KEYS = new Set([
   'max_staleness_days', 'staleness_field',
 ]);
 
+// The known keys of every adapter section, for the JSON Schema drift test
+// (test/schema.test.mjs). Not a package subpath: internal, like this module.
+export const KNOWN_KEYS = Object.freeze({
+  access: [...KNOWN_ACCESS_KEYS].sort(),
+  fetch: [...KNOWN_FETCH_KEYS].sort(),
+  pagination: [...KNOWN_PAGINATION_KEYS].sort(),
+  incremental: [...KNOWN_INCREMENTAL_KEYS].sort(),
+  retry: [...KNOWN_RETRY_KEYS].sort(),
+  map_rule: [...KNOWN_MAP_RULE_KEYS].sort(),
+  canary: [...KNOWN_CANARY_KEYS].sort(),
+});
+
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
   && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 const isSafeInt = (v) => Number.isSafeInteger(v);
@@ -287,6 +299,11 @@ function validateCanary(adapter, need) {
   }
 }
 
+/**
+ * @param {any} adapter
+ * @param {{ kinds?: Record<string, import('./types.mjs').Kind> }} [options]
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
 export function validateAdapterConfig(adapter, { kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
@@ -326,6 +343,11 @@ export function validateAdapterConfig(adapter, { kinds } = {}) {
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * @param {any} adapter
+ * @param {{ since?: string, kinds?: Record<string, import('./types.mjs').Kind> }} [options]
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
 export function validateFetchConfig(adapter, { since, kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };

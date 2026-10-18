@@ -48,8 +48,9 @@ function fail(message, detail) {
 // LICENSE, README) plus this package's own declared allowlist. Anything
 // else in the packed tarball is a real leak (adapters/, fixtures/, scripts/,
 // test/, plan.md, local store/run data, ...) and must fail loudly.
-const EXPECTED_TOP_LEVEL = new Set(['package.json', 'LICENSE', 'README.md', 'NOTES-generalization.md', 'MIGRATION-0.2.md']);
-const isExpectedPackedPath = (path) => path.split('/')[0] === 'src' || EXPECTED_TOP_LEVEL.has(path);
+const EXPECTED_TOP_LEVEL = new Set(['package.json', 'LICENSE', 'README.md', 'NOTES-generalization.md', 'MIGRATION-0.2.md', 'VERSIONING.md', 'UPGRADING.md', 'AGENTS.md', 'llms.txt', 'CHANGELOG.md']);
+const EXPECTED_DIRS = new Set(['src', 'schema', 'types']);
+const isExpectedPackedPath = (path) => EXPECTED_DIRS.has(path.split('/')[0]) || EXPECTED_TOP_LEVEL.has(path);
 
 // Shared by both consumer scripts: one html page, one row, one relative link.
 const HTML_FIXTURE = String.raw`
@@ -171,6 +172,34 @@ assert.equal(records[0].fields.title, 'A');
 console.log(JSON.stringify({ ok: true, checks: ['html-with-peer'] }));
 `;
 
+const CONSUMER_TYPES_SCRIPT = String.raw`
+import { runIngest, type RunIngestOptions, type Report } from '@shrinivas-sn/adapter-ingestion';
+import { validateAdapter } from '@shrinivas-sn/adapter-ingestion/adapter';
+import { buildReport } from '@shrinivas-sn/adapter-ingestion/report';
+
+const checked: { ok: boolean, errors: string[] } = validateAdapter({});
+const report: Report = buildReport({});
+const version: 2 = report.report_version;
+const codes: string[] = report.notices.map((n) => n.code);
+
+const options: RunIngestOptions = {
+  adapter: {
+    version: 1, host: 'example.test',
+    access: { tier: 1, kind: 'json-api', url: 'https://example.test/api' },
+    map: { source_id: { path: 'id' }, url: { path: 'link' } },
+  },
+  paths: { storeFile: 'store.jsonl', runsDir: 'runs', historyFile: 'history.jsonl' },
+};
+
+export async function go() {
+  const { report: r } = await runIngest(options);
+  const outcome: 'ok' | 'stale' | 'error' | 'aborted' = r.outcome;
+  // @ts-expect-error storeFile must be a string
+  await runIngest({ ...options, paths: { storeFile: 1, runsDir: 'runs' } });
+  return [checked, version, codes, outcome];
+}
+`;
+
 async function main() {
   const tempRoot = await mkdtemp(join(tmpdir(), 'verify-package-'));
   try {
@@ -255,11 +284,40 @@ async function main() {
     });
     if (unexpectedWrites.length > 0) fail('unexpected files written by import/install alone', unexpectedWrites.join('\n'));
 
+    // 7. Types: a TypeScript consumer compiles against the installed
+    // package's .d.mts files, and a wrong option type is rejected (the
+    // @ts-expect-error line fails the build if the types were just `any`).
+    // Uses this repo's own compiler; runs after step 6 so its files are not
+    // counted as side effects of install/import.
+    await writeFile(join(consumerDir, 'consumer-types.ts'), CONSUMER_TYPES_SCRIPT);
+    await writeFile(join(consumerDir, 'tsconfig.json'), JSON.stringify({
+      files: ['consumer-types.ts'],
+      compilerOptions: { module: 'nodenext', target: 'es2022', strict: true, noEmit: true, skipLibCheck: true, types: [] },
+    }, null, 2));
+    const tscPath = join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+    const typesResult = await node([tscPath, '-p', join(consumerDir, 'tsconfig.json')], consumerDir);
+    if (typesResult.code !== 0) fail('the TypeScript consumer did not type-check', typesResult.stdout || typesResult.stderr);
+
+    // 8. The installed bin: through npm's own bin link (what `npx` uses),
+    // and directly by path. Both must answer with the frozen --json shape.
+    await writeFile(join(consumerDir, 'cli-adapter.json'), JSON.stringify({
+      version: 1, host: 'example.test',
+      access: { tier: 0, kind: 'json-api', url: 'https://example.test/api' },
+      map: { source_id: { path: 'id' }, url: { path: 'link' } },
+    }));
+    const viaLink = await npm(['exec', '--no', '--', 'adapter-ingestion', 'validate', 'cli-adapter.json', '--json'], consumerDir);
+    if (viaLink.code !== 0) fail('the installed adapter-ingestion bin failed (npm exec)', viaLink.stderr || viaLink.stdout);
+    const linkOut = JSON.parse(viaLink.stdout.trim().split('\n').pop());
+    if (linkOut.ok !== true) fail('adapter-ingestion validate did not accept a valid adapter', viaLink.stdout);
+    const cliPath = join(consumerDir, 'node_modules', '@shrinivas-sn', 'adapter-ingestion', 'src', 'cli.mjs');
+    const direct = await node([cliPath, 'explain', 'E_FETCH', '--json'], consumerDir);
+    if (direct.code !== 0 || JSON.parse(direct.stdout).code !== 'E_FETCH') fail('adapter-ingestion explain failed', direct.stderr || direct.stdout);
+
     const result = {
       tarball: packInfo.filename, version: packInfo.version, integrity: packInfo.integrity,
       shasum: packInfo.shasum, entryCount: packInfo.entryCount,
       files: packInfo.files.map((f) => f.path).sort(),
-      consumerChecks: [...consumerOutput.checks, ...htmlOutput.checks],
+      consumerChecks: [...consumerOutput.checks, ...htmlOutput.checks, 'types', 'bin'],
       platform: process.platform, nodeVersion: process.version,
     };
     console.log('verify-package: PASS');

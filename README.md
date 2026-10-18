@@ -58,9 +58,11 @@ analytics, recalculation, and notification are the consuming app's job.
 npm install @shrinivas-sn/adapter-ingestion
 ```
 
-**The published package ships only the generic engine** (`src/`, plus this README and
-`MIGRATION-0.2.md`) — no adapters, fixtures, or scripts. You bring your own adapter JSON
-and call `runIngest` against it from your own code.
+**The published package ships only the generic engine**: `src/`, `types/` (TypeScript
+types), `schema/` (the adapter JSON Schema), this README, `AGENTS.md`, `llms.txt`,
+`VERSIONING.md`, `UPGRADING.md`, `CHANGELOG.md`, `MIGRATION-0.2.md` and
+`NOTES-generalization.md`. No adapters, fixtures or scripts. You bring your own adapter JSON
+and run it with `runIngest` from your own code, or with the `adapter-ingestion` command.
 
 The core has no runtime dependencies. For `access.kind: "html"`, also install the optional
 peer once: `npm install cheerio`. JSON-only users never need it.
@@ -149,10 +151,43 @@ try {
 Run it twice — the second run reports `fresh: 0` and `unchanged: 2`; nothing new gets
 appended to `store/example.test.jsonl`.
 
+## Command line
+
+The package installs an `adapter-ingestion` command (since 0.4). Run it with `npx`:
+
+| Command | What it does | Network |
+|---|---|---|
+| `adapter-ingestion validate <adapter.json>` | Checks an adapter offline and lists every error | none |
+| `adapter-ingestion run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]` | Runs one ingestion. Defaults: `store/<host>.jsonl`, `runs/<host>` | the adapter's source only |
+| `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `A_*` or `D_*` code | none |
+| `adapter-ingestion doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]` | Validates, checks Node and the optional `cheerio` peer, and lists notices. `--check-updates` asks the npm registry for the latest version | none, unless `--check-updates` |
+
+Every command takes `--json` and then prints exactly one JSON object on stdout:
+
+- `validate`: `{ ok, errors }`
+- `run`: `{ outcome, stages, canary, notices, failure }`
+- `explain`: `{ code, kind, meaning, cause, fix }`
+- `doctor`: `{ ok, errors, notices, environment: { node, node_ok, cheerio } }`, plus
+  `update: { status, current, latest }` with `--check-updates`
+- a usage or load error: `{ error: { code, message } }`
+
+Exit codes: `0` ok; `1` a stale run, an operational error or an abort; `2` a usage or
+configuration problem (bad arguments, an invalid adapter, an unsupported Node version, or
+an html adapter without `cheerio`). Without `--json`, `run` prints a summary on stdout and
+notices and failures on stderr. These commands, flags, keys and exit codes are part of the
+public surface ([VERSIONING.md](VERSIONING.md)). The older `node src/run.mjs <adapter.json>`
+entry point still works unchanged.
+
 ## API
 
 Every function below has a stable input/output/error contract. `error.code` is always one
 of the `E_*` constants named per function.
+
+TypeScript types ship with the package (since 0.4): each subpath resolves its own `.d.mts`
+through `exports`, generated from the source's JSDoc, so editors and agents see real
+signatures instead of `any`. The root module also exports the main shapes as types:
+`import type { RunIngestOptions, RunResult, Report, Notice, Adapter, StoreRecord, Kind } from '@shrinivas-sn/adapter-ingestion'`.
+The package itself is still plain JavaScript with no runtime dependencies.
 
 **Root (`@shrinivas-sn/adapter-ingestion`)**
 - `runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store })` →
@@ -164,6 +199,10 @@ of the `E_*` constants named per function.
   `AbortSignal`) cancels an in-flight fetch/wait; a cancellation that lands after the store
   append already committed does not roll back that commit. `kinds` registers your own
   formats (see [Source kinds](#source-kinds)); a malformed one is `E_OPTIONS`.
+  `paths.historyFile` (optional) keeps the canary's run history in one small file you can
+  commit (see [Canary history on CI](#canary-history-on-ci)); it must differ from
+  `paths.storeFile`. `report.notices` lists advice and deprecations for this adapter (see
+  [Reading a run report](#reading-a-run-report)).
 - Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a registered kind threw),
   `E_PARSE_NO_MATCH` (`html.script` matched nothing), `E_KIND_DEPENDENCY` (`html` without
   `cheerio` installed).
@@ -227,6 +266,21 @@ of the `E_*` constants named per function.
 - `splitByIndex(records, index)` → `{ fresh, changed, unchanged }`.
 
 ## Writing an adapter by hand
+
+For autocomplete and inline checks in your editor, point the adapter at the JSON Schema
+that ships with the package (since 0.4). Either the installed copy, which works offline:
+
+```json
+{ "$schema": "./node_modules/@shrinivas-sn/adapter-ingestion/schema/adapter.schema.json", "version": 1, "...": "..." }
+```
+
+or a version-pinned URL:
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.4.0/schema/adapter.schema.json`.
+The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
+helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
+authority, because some rules (selector compilation, cross-field checks) cannot be expressed
+in a schema. `$schema` does not change an adapter's fingerprint, so adding it keeps the
+canary's history.
 
 `map` entries are `{ path, normalize? }`. `path` is a dot-path into the raw source item
 (`"$"` for the item itself, `geometry.coordinates.0` for an array index). `normalize` is
@@ -336,6 +390,38 @@ notices respectively. `canary.breaches` names which threshold tripped
 (`min_records`/`required_field_ratio`/`count_drop_ratio`/`staleness`) when
 `canary.status === "stale"`. Full v2 schema: [MIGRATION-0.2.md](MIGRATION-0.2.md).
 
+`notices` (since 0.4) is a list of advice (`A_*`) and deprecations (`D_*`) about this
+adapter: what this engine version offers it, and anything it uses that will be removed.
+Each notice has `code`, `kind` (`"advice"` or `"deprecation"`), `message`, `since`, `docs`,
+and optionally `path` (the adapter key involved) and `removed_in`. Notices never change
+`outcome` or an exit code, and they never contain values, URLs or headers, so they are safe
+to log. Read them after every upgrade. `report_version` is still `2`: new keys are additive
+(see [VERSIONING.md](VERSIONING.md)).
+
+### Canary history on CI
+
+`count_drop_ratio` compares this run with the median of past runs, read from
+`runs/<host>/`. A scheduled CI job that starts from a fresh checkout has no `runs/`, so the
+check never has history and never fires; every run then carries an `A_CANARY_NO_HISTORY`
+notice. Fix it by keeping the history in a file you commit next to the store:
+
+```js
+await runIngest({
+  adapter,
+  paths: {
+    storeFile: 'store/example.gov.jsonl',
+    runsDir: 'runs/example.gov',
+    historyFile: 'store/example.gov.history.jsonl',
+  },
+});
+```
+
+Each line holds one finished run's `report_version`, `run_id`, `host`,
+`adapter_fingerprint`, `mode`, `outcome`, `started_at` and `stages`, and nothing else (no
+errors, URLs or headers). The file keeps the newest `max(50, 2 × median_window)` lines and
+is rewritten atomically under the store lock. With `historyFile` set, the canary reads
+history only from it. A run that fails validation or cannot take the lock adds no line.
+
 ## Gotchas
 
 - **`undefined` must never reach the store.** A missing value is `null`, consistently. An
@@ -417,11 +503,12 @@ This repo carries worked-example adapters, each with recorded fixtures (`adapter
 `fixtures/`, `filters/`). They cover a public-domain government feed, a WordPress site's
 JSON endpoint and a public security-advisory API, plus a template `example.adapter.json`.
 They are **not** part of the npm package — `npm pack`'s file allowlist (`package.json`'s
-`"files"`) ships only `src/`, `README.md`, `NOTES-generalization.md`, and
-`MIGRATION-0.2.md`; verified by `scripts/verify-package.mjs` (packs the real tarball,
-installs it into a disposable consumer, and runs a consumer script that imports only the
-installed package). The CLI entry point (`node src/run.mjs <adapter.json> [--since
-YYYY-MM-DD]`) is this repo's own dev convenience, not a published `bin`/`npx` command —
+`"files"`) ships only the engine, its types and schema, and the docs listed under
+[Install](#install); verified by `scripts/verify-package.mjs` (packs the real tarball,
+installs it into a disposable consumer, runs a consumer script that imports only the
+installed package, type-checks a TypeScript consumer, and runs the installed bin). The
+published command is `adapter-ingestion` (see [Command line](#command-line)). The older
+entry point `node src/run.mjs <adapter.json> [--since YYYY-MM-DD]` still works —
 running `node src/run.mjs adapters/<HOST>.adapter.json` writes `runs/<HOST>/report-*.json`
 and exits non-zero on a stale canary or failure (exit codes: `0` ok, `1` stale/operational
 error/aborted, `2` usage/configuration).

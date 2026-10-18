@@ -12,6 +12,11 @@ import { IngestionError } from './errors.mjs';
 //
 // Returns the raw bytes: decoding belongs to the source kind, because only
 // it knows the format (JSON is UTF-8 by spec; HTML must sniff its charset).
+/**
+ * @param {Response} response
+ * @param {{ signal?: AbortSignal, maxResponseBytes?: number, budget?: any }} [options]
+ * @returns {Promise<{ buffer: Buffer, bytes: number }>}
+ */
 export async function readBodyBytes(response, { signal, maxResponseBytes, budget } = {}) {
   if (!response.body) {
     // A response with no body stream (some minimal doubles, a 204) has
@@ -118,8 +123,13 @@ export function retryDelay({ retryNumber, backoffMs, maxDelayMs, retryAfter, now
 // pure arithmetic). Always removes its timer/listener on the way out so a
 // long-lived AbortSignal never accumulates dangling listeners across many
 // waits in one fetchAll call.
+/**
+ * @param {number} ms
+ * @param {AbortSignal} [signal]
+ * @returns {Promise<void>}
+ */
 export function waitFor(ms, signal) {
-  return new Promise((resolve, reject) => {
+  return new Promise(/** @param {(value?: void) => void} resolve */ (resolve, reject) => {
     if (signal?.aborted) {
       reject(new IngestionError('E_ABORTED', 'aborted while waiting'));
       return;

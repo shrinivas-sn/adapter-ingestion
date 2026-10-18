@@ -14,6 +14,12 @@ const MODES = ['select', 'script_json'];
 const SELECT_KEYS = new Set(['mode', 'rows', 'fields']);
 const SCRIPT_JSON_KEYS = new Set(['mode', 'script']);
 const FIELD_KEYS = new Set(['selector', 'attr', 'resolve_url']);
+// For the JSON Schema drift test (test/schema.test.mjs).
+export const HTML_KNOWN_KEYS = Object.freeze({
+  select: [...SELECT_KEYS].sort(),
+  script_json: [...SCRIPT_JSON_KEYS].sort(),
+  field: [...FIELD_KEYS].sort(),
+});
 const MAX_SELECTOR = 500;
 const MAX_ATTR = 100;
 const MAX_FIELDS = 100;

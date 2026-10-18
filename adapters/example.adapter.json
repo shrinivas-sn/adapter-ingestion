@@ -1,4 +1,5 @@
 {
+  "$schema": "../schema/adapter.schema.json",
   "version": 1,
   "host": "<HOST>",
   "access": { "tier": 1, "kind": "json-api", "url": "https://<HOST>/<PATH>" },

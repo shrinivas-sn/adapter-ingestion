@@ -71,6 +71,11 @@ function finalizeLine(slices, lineNumber, onWarning) {
 // not the reused read buffer itself) and concatenated exactly once, when
 // the line actually completes; nothing here repeatedly concatenates on
 // every incoming chunk, which is what would make a very long line quadratic.
+/**
+ * @param {string} filePath
+ * @param {{ maxLineBytes?: number, onWarning?: (warning: { code: string, line: number }) => void }} [options]
+ * @returns {AsyncGenerator<import('./types.mjs').StoreRecord>}
+ */
 export async function* iterateRecords(filePath, { maxLineBytes = 64_000_000, onWarning } = {}) {
   let handle;
   try {
@@ -142,6 +147,11 @@ export async function* iterateRecords(filePath, { maxLineBytes = 64_000_000, onW
   }
 }
 
+/**
+ * @param {string} filePath
+ * @param {{ maxLineBytes?: number, onWarning?: (warning: { code: string, line: number }) => void }} [options]
+ * @returns {Promise<import('./types.mjs').StoreRecord[]>}
+ */
 export async function readRecords(filePath, options = {}) {
   const out = [];
   for await (const record of iterateRecords(filePath, options)) out.push(record);
@@ -154,6 +164,11 @@ export async function readRecords(filePath, options = {}) {
 // wants this instead: last-line-wins per id, so an edited listing appears
 // once, not once per revision. Reduces directly over the iterator -- it
 // never materializes the full history array readRecords does.
+/**
+ * @param {string} filePath
+ * @param {{ maxLineBytes?: number, onWarning?: (warning: { code: string, line: number }) => void }} [options]
+ * @returns {Promise<import('./types.mjs').StoreRecord[]>}
+ */
 export async function readLatestRecords(filePath, options = {}) {
   const byId = new Map();
   for await (const record of iterateRecords(filePath, options)) byId.set(record.id, record);
@@ -164,12 +179,23 @@ export async function readLatestRecords(filePath, options = {}) {
 // and hash a caller needs to classify a new batch as fresh/changed/unchanged
 // -- O(unique ids), never O(history length) and never a second full pass
 // over the records readLatestRecords would have built.
+/**
+ * @param {string} filePath
+ * @param {{ maxLineBytes?: number, onWarning?: (warning: { code: string, line: number }) => void }} [options]
+ * @returns {Promise<Map<string, string>>}
+ */
 export async function readIndex(filePath, options = {}) {
   const idx = new Map();
   for await (const record of iterateRecords(filePath, options)) idx.set(record.id, record.content_hash);
   return idx;
 }
 
+/**
+ * @param {string} filePath
+ * @param {import('./types.mjs').StoreRecord[]} records
+ * @param {{ maxLineBytes?: number }} [options]
+ * @returns {Promise<number>} records written
+ */
 export async function appendRecords(filePath, records, { maxLineBytes = 64_000_000 } = {}) {
   if (!records.length) return 0;
 
