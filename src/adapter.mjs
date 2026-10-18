@@ -1,8 +1,10 @@
 import { extractAll } from './extract.mjs';
 import { validateAdapterConfig } from './config.mjs';
 
-export function validateAdapter(adapter) {
-  return validateAdapterConfig(adapter);
+// `kinds` registers caller-defined source kinds (see runIngest's kinds option).
+// A null/absent second argument is ignored, as it was before the option existed.
+export function validateAdapter(adapter, options) {
+  return validateAdapterConfig(adapter, { kinds: options?.kinds });
 }
 
 export function verifyAgainstFixtures(adapter, fixtureItems) {

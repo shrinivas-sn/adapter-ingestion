@@ -1,12 +1,41 @@
 # adapter-ingestion
 
-Keeps any app supplied with fresh records from websites that have no API. An adapter is a
-small JSON config generated once per source; a plain-rules runner applies it on every cron
-at zero LLM cost. A relevance filter is a read-time view over stored records, never a
-write-time gate. A canary flags a stale adapter — loudly — when a source changes shape.
+[![npm](https://img.shields.io/npm/v/@shrinivas-sn/adapter-ingestion)](https://www.npmjs.com/package/@shrinivas-sn/adapter-ingestion)
+[![CI](https://github.com/shrinivas-sn/adapter-ingestion/actions/workflows/ci.yml/badge.svg)](https://github.com/shrinivas-sn/adapter-ingestion/actions/workflows/ci.yml)
+[![node](https://img.shields.io/node/v/@shrinivas-sn/adapter-ingestion)](package.json)
+[![license](https://img.shields.io/npm/l/@shrinivas-sn/adapter-ingestion)](LICENSE)
+
+Keeps a Node app supplied with fresh records from JSON APIs and server-rendered HTML pages
+on a schedule. That covers official APIs, the JSON endpoints many sites expose without
+advertising them as an API, and plain HTML listings read with CSS selectors.
+An adapter is a small JSON config written once per source, and a plain-rules runner applies
+it on every cron at zero LLM cost. A relevance filter is a read-time view over stored
+records, never a write-time gate. A canary flags a stale adapter, loudly, when a source
+changes shape or quietly stops returning data.
 
 Published to npm as [`@shrinivas-sn/adapter-ingestion`](https://www.npmjs.com/package/@shrinivas-sn/adapter-ingestion).
 Requires **Node 22.15.0 or newer**. Upgrading from 0.1.x? See [MIGRATION-0.2.md](MIGRATION-0.2.md).
+
+## Is this for you?
+
+**Use it if** you are in Node and want scheduled JSON or HTML pulls into a plain file store
+with no database. You also get change detection (fresh / changed / unchanged) and an alarm when
+a source goes quiet or changes shape.
+
+**Look elsewhere if:**
+
+- You are in Python or want a warehouse or database destination. Use
+  [dlt](https://github.com/dlt-hub/dlt)'s REST API source.
+- You want no-code "watch this and notify me" agents. Use
+  [Huginn](https://github.com/huginn/huginn).
+- You need POST, GraphQL, OAuth, or pages that only render in a browser. This package does
+  not do them (see [Non-goals](#non-goals)).
+
+**What it ingests today** (HTTP GET, see [Source kinds](#source-kinds)):
+- JSON (`json-api`).
+- HTML pages (`html`): rows picked by CSS selectors, or the JSON inside a `<script>` such
+  as JSON-LD or `__NEXT_DATA__`. Needs the optional `cheerio` package.
+- Any other format (CSV, XML, ...) through a `kinds` parser you register.
 
 ```
   generator (once, per source)  ->  adapter file
@@ -32,6 +61,9 @@ npm install @shrinivas-sn/adapter-ingestion
 **The published package ships only the generic engine** (`src/`, plus this README and
 `MIGRATION-0.2.md`) — no adapters, fixtures, or scripts. You bring your own adapter JSON
 and call `runIngest` against it from your own code.
+
+The core has no runtime dependencies. For `access.kind: "html"`, also install the optional
+peer once: `npm install cheerio`. JSON-only users never need it.
 
 ## Quick start
 
@@ -123,17 +155,22 @@ Every function below has a stable input/output/error contract. `error.code` is a
 of the `E_*` constants named per function.
 
 **Root (`@shrinivas-sn/adapter-ingestion`)**
-- `runIngest({ adapter, paths, since, fetchImpl, signal, now = new Date(), store })` →
+- `runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store })` →
   `Promise<{ report, canary }>` on success (including a `stale` canary — that's not a
   failure). Rejects with an `IngestionError` (`err.code`, `err.message`, `err.report`) on a
   config, transport, storage, lock, cancellation, or reporting failure. `paths.storeFile`/
   `paths.runsDir` are required nonempty strings. `since` (a `YYYY-MM-DD` string) switches to
   incremental mode and requires `adapter.fetch.incremental` to be configured. `signal` (an
   `AbortSignal`) cancels an in-flight fetch/wait; a cancellation that lands after the store
-  append already committed does not roll back that commit.
+  append already committed does not roll back that commit. `kinds` registers your own
+  formats (see [Source kinds](#source-kinds)); a malformed one is `E_OPTIONS`.
+- Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a registered kind threw),
+  `E_PARSE_NO_MATCH` (`html.script` matched nothing), `E_KIND_DEPENDENCY` (`html` without
+  `cheerio` installed).
 
 **`/adapter`**
-- `validateAdapter(adapter)` → `{ ok: boolean, errors: string[] }`. Never throws.
+- `validateAdapter(adapter, { kinds }?)` → `{ ok: boolean, errors: string[] }`. Never
+  throws. Pass the same `kinds` you give `runIngest` so a custom kind validates.
 - `verifyAgainstFixtures(adapter, fixtureItems)` → `{ total, parsed, ratio, fieldFailures }`
   — run this against real fetched samples before trusting a generated adapter.
 
@@ -156,8 +193,8 @@ of the `E_*` constants named per function.
   to fail before this point instead.
 
 **`/fetch`**
-- `fetchAll(adapter, { since, fetchImpl = fetch, signal }?)` → `Promise<{ items, pages,
-  statuses, diagnostics }>`. `fetchImpl` must resolve with a real `Response`.
+- `fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds }?)` → `Promise<{ items,
+  pages, statuses, diagnostics }>`. `fetchImpl` must resolve with a real `Response`.
 
 **`/canary`**
 - `checkCanary(report, history, cfg, { now = new Date() }?)` → `{ status: 'ok'|'stale',
@@ -205,6 +242,78 @@ provenance guarantee, not a formality: it's what makes a record's `source_host` 
 max_pages?, allow_truncation? }`. Hitting `max_pages` on a still-full-looking page is a
 hard failure unless `allow_truncation: true`.
 
+## Source kinds
+
+`access.kind` says how a response body becomes records. Parsing happens after the bounded
+read, so every kind gets the same transport rules: timeouts, byte caps, retries, no
+redirects, pagination and repeat-page checks, `max_records`, and the canary.
+
+**`json-api`**: the body is JSON; `records_path` points at the array of records.
+
+**`html`**: server-rendered pages. Install the optional peer first (`npm install cheerio`);
+without it, an html adapter fails with `E_KIND_DEPENDENCY`. Selectors are data in the
+adapter, never code. An unsupported selector (such as `:hover`) fails as
+`E_ADAPTER_INVALID`, naming the field. The data must be in the server's first response:
+pages that only fill in through JavaScript are not supported.
+
+- `select` mode: one record per element matching `rows`. A field is the trimmed text of the
+  first element matching its `selector` inside the row (no `selector` means the row itself),
+  or that element's `attr`. A missing element or empty value is `null`. With
+  `resolve_url: true` the value becomes an absolute URL against the page URL; anything but
+  `http`/`https` (such as `javascript:` or `mailto:`) becomes `null`. `records_path` must be
+  `"$"`.
+
+  ```json
+  "access": { "tier": 2, "kind": "html", "url": "https://news.ycombinator.com/" },
+  "html": {
+    "mode": "select",
+    "rows": "tr.athing",
+    "fields": {
+      "id":    { "attr": "id" },
+      "title": { "selector": ".titleline > a" },
+      "link":  { "selector": ".titleline > a", "attr": "href", "resolve_url": true }
+    }
+  },
+  "records_path": "$",
+  "map": { "source_id": { "path": "id" }, "url": { "path": "link" }, "title": { "path": "title", "normalize": "text" } }
+  ```
+
+- `script_json` mode: `{ "mode": "script_json", "script": "script#__NEXT_DATA__" }`. The
+  JSON inside the first matching element becomes the body, and `records_path` and `map` work
+  as for `json-api`. To pick one of several JSON-LD blocks, match on content:
+  `script[type="application/ld+json"]:contains("ItemList")`. No match is `E_PARSE_NO_MATCH`;
+  invalid JSON is `E_RESPONSE_JSON`.
+
+Encoding is detected from the raw bytes: a byte-order mark first, then the `Content-Type`
+charset, then `<meta charset>`. With none of these, the page is read as UTF-8. Legacy
+encodings such as windows-1252, KOI8-R or Shift_JIS decode correctly.
+
+The repository's `adapters/` folder has worked html examples for seven sites on different
+platforms, each with its recorded page under `fixtures/`.
+
+**Your own format (`kinds`)**: register a parser and name it in `access.kind`.
+
+```js
+const csv = {
+  // Bytes in, an array of plain objects out (sync or async).
+  parse({ bytes }) {
+    const [header, ...lines] = bytes.toString('utf8').trim().split('\n');
+    const keys = header.split(',');
+    return lines.map((line) => Object.fromEntries(line.split(',').map((v, i) => [keys[i], v])));
+  },
+  // Optional: extra adapter checks, reported like built-in ones.
+  validate(adapter, need) { need(adapter.records_path === '$', 'csv adapters use records_path "$"'); },
+};
+
+// adapter.access = { tier: 1, kind: 'csv', url: 'https://example.test/data.csv' }
+await runIngest({ adapter, paths, kinds: { csv } });
+```
+
+`parse` receives `{ bytes, contentType, url, adapter }`. A name that shadows a built-in kind
+is `E_OPTIONS`. If `parse` throws, the run fails with `E_PARSE` and a generic message: your
+error's text never reaches a report (it stays on `err.cause`). A result that is not the array
+`records_path` expects fails with `E_RESPONSE_SHAPE`, as for JSON.
+
 ## Writing a filter
 
 A filter is declarative data, never code. `mode: "all"` ANDs its rules, `"any"` ORs them.
@@ -247,19 +356,55 @@ notices respectively. `canary.breaches` names which threshold tripped
   `fetch.max_records`: 5000; `fetch.max_response_bytes`: 20MB; `fetch.max_total_bytes`:
   100MB across all pages). A source with a legitimately larger page size or slower response
   needs these raised explicitly — the defaults exist so an unattended cron run can't hang
-  indefinitely or OOM the runner on a single misbehaving or hostile response.
+  indefinitely or OOM the runner on a single misbehaving or hostile response. `html`
+  defaults to 5MB per response instead, because a parsed page takes many times its size
+  in memory; set `fetch.max_response_bytes` to change it. A page with more rows than
+  `max_records` fails before any record is built.
+- **Parsing is CPU work that `timeout_ms` does not interrupt.** The timeout covers the
+  request and the body download; `max_duration_ms` is checked again once parsing returns.
+  A pathological page (thousands of nested elements) can still take seconds to parse, so
+  keep `max_response_bytes` small for sources you don't trust.
+- **The canary's `count_drop_ratio` check needs earlier run reports.** It compares this
+  run with the median of recent reports in `paths.runsDir`. A CI runner that starts from a
+  fresh checkout every time has no history, so this check silently never fires. Persist
+  `runsDir` between runs (a CI cache, or a few committed reports) if you rely on it.
+  `min_records`, `required_field_ratio` and `staleness` need no history.
 - **A UA-only bot gate shows up as a 403 with a default agent, 200 with a browser UA** —
   probe both when writing a new adapter.
+- **Redirects are not followed.** A 301 or 302 fails as `E_REDIRECT`. Put the final URL in
+  `access.url` (check it with `curl -sI <url>`).
+- **Records that share a `source_id` within one run collapse to one** (the last one wins). A
+  page that lists the same link twice, such as a menu plus the body, reports more `fetched`
+  than `fresh` + `changed` + `unchanged`.
 - **No cross-source fuzzy dedupe** (within-source only, by design — see Non-goals).
 
 ## Non-goals
 
-Not a general-purpose scraper, not a dashboard/analytics/storage product, not a hosted
-service. Doesn't own what a consuming app does with ingested data. No cross-source fuzzy
+Not a crawler or a general-purpose scraper: one adapter reads one listing URL (plus its
+pages). Not a dashboard/analytics/storage product, not a hosted service. Doesn't own what a consuming app does with ingested data. No cross-source fuzzy
 dedupe (within-source only, v1). No unattended LLM regeneration — a stale canary alerts; a
 human re-runs whatever generated the adapter. No distributed/networked locking — one local
 store, one physical lock file, cooperative single-machine exclusion only. No POST/GraphQL/
-auth/OAuth (JSON GET only, this release).
+auth/OAuth (GET only). No headless browser: pages that only render through JavaScript are
+out of scope.
+
+## Project status and roadmap
+
+| Question | Where to look |
+|---|---|
+| What shipped in each version? | [CHANGELOG.md](CHANGELOG.md) (generated by Changesets) and the [npm version history](https://www.npmjs.com/package/@shrinivas-sn/adapter-ingestion?activeTab=versions) |
+| What changed between majors, and how do I upgrade? | [MIGRATION-0.2.md](MIGRATION-0.2.md) |
+| Why does the engine stay generic? | [NOTES-generalization.md](NOTES-generalization.md) |
+
+**Rule for new scope:** a new capability needs evidence from at least two real sources
+before it is planned. That keeps the engine generic instead of shaped around one site.
+
+## Contributing
+
+Issues and pull requests are welcome. Work happens on feature branches and lands on `main`
+by pull request. A change that affects the published package needs a changeset
+(`npx changeset`), and `npm test` must pass on the CI matrix. Please open an issue first for
+new adapter capabilities, so the two-source evidence rule above can be checked.
 
 ---
 
@@ -268,8 +413,10 @@ auth/OAuth (JSON GET only, this release).
 The sections below are about *this* repository's own worked examples, dev tooling, and
 release process — none of it is required to use the published package.
 
-This repo carries two worked-example adapters (`adapters/`, `fixtures/`, `filters/`) that
-are **not** part of the npm package — `npm pack`'s file allowlist (`package.json`'s
+This repo carries worked-example adapters, each with recorded fixtures (`adapters/`,
+`fixtures/`, `filters/`). They cover a public-domain government feed, a WordPress site's
+JSON endpoint and a public security-advisory API, plus a template `example.adapter.json`.
+They are **not** part of the npm package — `npm pack`'s file allowlist (`package.json`'s
 `"files"`) ships only `src/`, `README.md`, `NOTES-generalization.md`, and
 `MIGRATION-0.2.md`; verified by `scripts/verify-package.mjs` (packs the real tarball,
 installs it into a disposable consumer, and runs a consumer script that imports only the
@@ -290,8 +437,9 @@ error/aborted, `2` usage/configuration).
 
 ### Verifying a new or changed adapter manually
 
-`scripts/verify-earthquake-adapter.mjs` and `scripts/run-earthquake-offline.mjs` are
-reusable patterns (not project-specific despite the name) for checking an adapter against
+`scripts/verify-*-adapter.mjs` and
+`scripts/run-earthquake-offline.mjs` are reusable patterns (not project-specific despite the
+names) for checking an adapter against
 its fixtures and running the full pipeline offline before ever hitting the network.
 `scripts/run-earthquake-broken.mjs` is the canary regression check — copy this pattern
 whenever adding a new source, pointed at the new adapter/fixture.

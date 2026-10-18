@@ -234,3 +234,32 @@ test('verifyAgainstFixtures reports the parse ratio and the failing fields', () 
   assert.equal(r.ratio, 0.5);
   assert.deepEqual(r.fieldFailures, { title: 1 });
 });
+
+test('an unknown kind names itself, the supported kinds, and the two ways out', () => {
+  const r = validateAdapter({ ...base, access: { ...base.access, kind: 'rss' } });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.includes(
+    'access.kind "rss" is not supported by this engine (html, json-api); it may need a newer version or a registered kind'),
+  r.errors.join(' | '));
+});
+
+test('a caller-registered kind validates, and its own validate() can add errors', () => {
+  const adapter = { ...base, access: { ...base.access, kind: 'csv' } };
+  assert.equal(validateAdapter(adapter, { kinds: { csv: { parse() {}, validate() {} } } }).ok, true);
+  const strict = { csv: { parse() {}, validate(a, need) { need(false, 'csv needs a delimiter'); } } };
+  assert.deepEqual(validateAdapter(adapter, { kinds: strict }).errors, ['csv needs a delimiter']);
+  assert.equal(validateFetchConfig(adapter, { kinds: { csv: { parse() {} } } }).ok, true);
+});
+
+test('an unknown key says it may be a typo or a field from a newer version', () => {
+  const r = validateAdapter({ ...base, access: { ...base.access, colour: 'x' } });
+  assert.ok(r.errors.includes('access.colour: unknown key (a typo, or a field from a newer version)'), r.errors.join(' | '));
+});
+
+test('a caller kind whose validate() throws is a validation error, without its message', () => {
+  const adapter = { ...base, access: { ...base.access, kind: 'csv' } };
+  const kinds = { csv: { parse() {}, validate() { throw new Error('secret token abc'); } } };
+  const r = validateAdapter(adapter, { kinds });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.errors, ['access.kind "csv": the kind\'s validate() threw']);
+});

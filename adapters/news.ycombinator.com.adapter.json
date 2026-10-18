@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "host": "news.ycombinator.com",
+  "access": {
+    "tier": 2,
+    "kind": "html",
+    "url": "https://news.ycombinator.com/"
+  },
+  "fetch": {
+    "method": "GET",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (compatible; adapter-ingestion/0.3)"
+    }
+  },
+  "html": {
+    "mode": "select",
+    "rows": "tr.athing",
+    "fields": {
+      "id": {
+        "attr": "id"
+      },
+      "rank": {
+        "selector": ".rank"
+      },
+      "title": {
+        "selector": ".titleline > a"
+      },
+      "link": {
+        "selector": ".titleline > a",
+        "attr": "href",
+        "resolve_url": true
+      }
+    }
+  },
+  "records_path": "$",
+  "map": {
+    "source_id": {
+      "path": "id"
+    },
+    "url": {
+      "path": "link"
+    },
+    "title": {
+      "path": "title",
+      "normalize": "text"
+    },
+    "rank": {
+      "path": "rank",
+      "normalize": "text"
+    }
+  },
+  "required": [
+    "source_id",
+    "url",
+    "title"
+  ],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.5,
+    "required_field_ratio": 0.9
+  },
+  "fixtures": [
+    "fixtures/news.ycombinator.com/page-1.html"
+  ],
+  "generated_at": "2026-10-18",
+  "generator_model": "claude-opus-5-5",
+  "verified_against_fixtures": "30/30"
+}

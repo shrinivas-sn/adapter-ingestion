@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { getPath } from './extract.mjs';
-import { readJsonBody, retryDelay, waitFor } from './http.mjs';
+import { waitFor } from './http.mjs';
 import { IngestionError } from './errors.mjs';
+import { requestPage } from './fetch/request.mjs';
+import { resolveKind, validateKindsOption, BUILTIN_KINDS } from './kinds/index.mjs';
 
 export function buildUrl(adapter, { page, since } = {}) {
   const url = new URL(adapter.access.url);
@@ -15,23 +17,6 @@ export function buildUrl(adapter, { page, since } = {}) {
   return url.toString();
 }
 
-// Classified from the shapes actually thrown by Node 22.15's native fetch
-// (undici), not by pattern-matching arbitrary error text: AbortSignal.timeout
-// firing names its error 'TimeoutError' even through AbortSignal.any;
-// a manual AbortController firing names it 'AbortError'; redirect:'error'
-// rejects with a TypeError whose .cause.message is exactly
-// 'unexpected redirect'. Anything else is an undifferentiated E_FETCH.
-function classifyFetchError(err) {
-  if (err?.name === 'TimeoutError') return 'E_TIMEOUT';
-  if (err?.name === 'AbortError') return 'E_ABORTED';
-  if (err?.cause?.message === 'unexpected redirect') return 'E_REDIRECT';
-  return 'E_FETCH';
-}
-
-async function drainQuietly(res) {
-  try { await res.body?.cancel?.(); } catch { /* already closed or errored */ }
-}
-
 // Response-order-sensitive: a source that echoes different content because
 // records were reordered is not a repeat, but two responses byte-identical
 // as delivered means the page parameter almost certainly did nothing.
@@ -39,18 +24,8 @@ function digestBatch(batch) {
   return createHash('sha256').update(JSON.stringify(batch)).digest('hex');
 }
 
-// Only these are worth a second try. Caller abort, the total deadline,
-// redirects, malformed JSON, shape/config errors, and size/record limits are
-// all either not transient or not safe to repeat -- retrying them would
-// either never succeed or duplicate an already-oversized request.
-const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
-function isRetryableError(err) {
-  if (err.code === 'E_FETCH' || err.code === 'E_TIMEOUT') return true;
-  if (err.code === 'E_HTTP_STATUS') return RETRYABLE_STATUSES.has(err.details?.fetch?.status);
-  return false;
-}
-
-export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {}) {
+export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds } = {}) {
+  validateKindsOption(kinds);
   const p = adapter.fetch?.pagination;
   const hasPagination = p !== undefined;
   const maxPages = p?.max_pages ?? 1;
@@ -59,7 +34,14 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
   const timeoutMs = adapter.fetch?.timeout_ms ?? 30_000;
   const maxDurationMs = adapter.fetch?.max_duration_ms ?? 120_000;
   const maxRecords = adapter.fetch?.max_records ?? 5000;
-  const maxResponseBytes = adapter.fetch?.max_response_bytes ?? 20_000_000;
+  // fetchAll never validated the adapter itself (runIngest does), and it has
+  // always parsed JSON whatever access.kind said; an unresolvable kind keeps
+  // doing exactly that rather than crashing a direct caller.
+  const kind = resolveKind(adapter.access?.kind, kinds) ?? BUILTIN_KINDS.get('json-api');
+  const isBuiltinKind = BUILTIN_KINDS.get(kind.name) === kind;
+  // A kind may set a tighter default than the global one (html does: its DOM
+  // costs many times the page size); an explicit adapter value always wins.
+  const maxResponseBytes = adapter.fetch?.max_response_bytes ?? kind.defaults?.max_response_bytes ?? 20_000_000;
   const maxTotalBytes = adapter.fetch?.max_total_bytes ?? 100_000_000;
   const delayMs = adapter.fetch?.delay_ms ?? 0;
   const retryCfg = adapter.fetch?.retry ?? {};
@@ -80,8 +62,7 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
   let complete = true;
   let stopReason = hasPagination ? null : 'single_page';
   let lastBatchDigest = null;
-  let totalAttempts = 0;
-  let totalRetries = 0;
+  const counters = { totalAttempts: 0, totalRetries: 0 };
 
   for (let page = 1; page <= maxPages; page++) {
     const fetchContext = (extra = {}) => ({ fetch: { origin, page, pages, statuses: [...statuses], ...extra } });
@@ -96,114 +77,33 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
 
     const url = buildUrl(adapter, { page, since });
 
+    const { buffer, contentType } = await requestPage({
+      url, adapter, fetchImpl, signal, timeoutMs, maxResponseBytes, budget,
+      retry: { maxAttempts, backoffMs, maxRetryDelayMs },
+      deadline: { startedAt, maxDurationMs },
+      fetchContext, counters, statuses,
+    });
+
+    // Parsed here, still before the deadline check below, exactly where the
+    // JSON parse used to sit at the end of the attempt loop; a parse error
+    // was never retryable, so lifting it out of the loop changes nothing.
     let body;
-    let attempt = 0;
-    for (;;) {
-      attempt++;
-      totalAttempts++;
-      const attemptSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)]);
-      let res;
-      let failure;
-
-      try {
-        res = await fetchImpl(url, {
-          method: adapter.fetch?.method ?? 'GET',
-          headers: adapter.fetch?.headers ?? {},
-          redirect: 'error',
-          signal: attemptSignal,
-        });
-      } catch (err) {
-        const code = classifyFetchError(err);
-        // The old implementation concatenated the *full* request URL (query
-        // string and all) straight into this message -- that's B14: an API
-        // key or signed path landing in a report or CLI log. Only the
-        // underlying reason travels in the message now; origin-only context
-        // lives in .details.fetch, and the full cause stays in-memory only.
-        const reason = code === 'E_TIMEOUT' ? `timed out after ${timeoutMs}ms`
-          : code === 'E_ABORTED' ? 'aborted'
-          : code === 'E_REDIRECT' ? 'unexpected redirect (redirects are not followed)'
-          : (err?.message ?? String(err));
-        failure = new IngestionError(code, `fetch failed: ${reason}`, { cause: err, details: fetchContext() });
-      }
-
-      if (!failure) {
-        statuses.push(res.status);
-        // Fail loudly. A UA-only bot gate shows up here as a 403 and must
-        // never be swallowed into an empty result that looks like "no new
-        // records", and a 400/404 on a later page is never treated as a
-        // normal end-of-list -- only an actually empty or short batch
-        // signals completion.
-        if (!res.ok) {
-          await drainQuietly(res);
-          failure = new IngestionError('E_HTTP_STATUS', `unexpected HTTP status ${res.status}`,
-            { details: fetchContext({ status: res.status }) });
-        }
-      }
-
-      if (!failure) {
-        // Content-Length is only an early rejection hint; actual bytes are
-        // counted as the body streams in below, which is what actually
-        // enforces the cap against a chunked response or a lying/absent
-        // header.
-        const contentLength = res.headers?.get?.('content-length');
-        if (contentLength && Number(contentLength) > maxResponseBytes) {
-          await drainQuietly(res);
-          failure = new IngestionError('E_RESPONSE_LIMIT',
-            `response too large: declared ${contentLength} bytes > max_response_bytes ${maxResponseBytes}`,
-            { details: fetchContext() });
-        }
-      }
-
-      if (!failure) {
-        try {
-          ({ json: body } = await readJsonBody(res, { signal: attemptSignal, maxResponseBytes, budget }));
-        } catch (err) {
-          if (err instanceof IngestionError) {
-            err.details = { ...(err.details ?? {}), ...fetchContext() };
-            failure = err;
-          } else {
-            // A stall mid-body (not just mid-header) aborts the same
-            // attemptSignal, and the underlying stream read rejects with the
-            // raw TimeoutError/AbortError, not one of ours -- classify it the
-            // same way a connection-phase failure is classified, so callers
-            // see one consistent error shape regardless of which phase the
-            // abort landed in.
-            const code = classifyFetchError(err);
-            const reason = code === 'E_TIMEOUT' ? `timed out after ${timeoutMs}ms`
-              : code === 'E_ABORTED' ? 'aborted'
-              : (err?.message ?? String(err));
-            failure = new IngestionError(code, `fetch failed: ${reason}`, { cause: err, details: fetchContext() });
-          }
-        }
-      }
-
-      if (!failure) break; // this attempt succeeded -- fall through to per-page processing
-
-      if (!isRetryableError(failure) || attempt >= maxAttempts) throw failure;
-
-      const retryAfterHeader = res?.headers?.get?.('retry-after') ?? undefined;
-      const { delayMs: waitMs, deferred, retryAfterMs } = retryDelay({
-        retryNumber: attempt, backoffMs, maxDelayMs: maxRetryDelayMs, retryAfter: retryAfterHeader, nowMs: Date.now(),
+    try {
+      body = await kind.parse({
+        bytes: buffer, contentType, url, adapter,
+        limits: { maxRecords, remainingRecords: maxRecords - items.length },
       });
-      const remainingBudget = maxDurationMs - (Date.now() - startedAt);
-
-      // A server-specified Retry-After that we can't honor -- either it's
-      // past what retry.max_delay_ms allows, or past what's left of
-      // max_duration_ms -- must fail loudly with the requested wait attached,
-      // never silently shortened or silently ignored.
-      if (deferred || (retryAfterMs !== null && retryAfterMs > remainingBudget)) {
-        throw new IngestionError('E_RETRY_DEFERRED',
-          'the server-requested retry delay exceeds the configured retry/fetch budget',
-          { details: { ...fetchContext(), retry_after_ms: retryAfterMs } });
+    } catch (err) {
+      // Built-in kinds throw our own typed errors, which pass through. Caller
+      // kind code may throw anything -- even one of our errors carrying text
+      // it chose -- that could hold a secret or a page fragment; like E_FETCH,
+      // only our own message is reported, and the original stays as .cause.
+      if (err instanceof IngestionError && isBuiltinKind) {
+        err.details = { ...(err.details ?? {}), ...fetchContext() };
+        throw err;
       }
-      // No server directive involved (pure exponential backoff) and there
-      // isn't enough budget left to wait and still attempt again -- give up
-      // quietly with the failure that actually happened, rather than turning
-      // a used-up retry budget into a distinct deadline error.
-      if (waitMs > remainingBudget) throw failure;
-
-      totalRetries++;
-      await waitFor(waitMs, signal);
+      throw new IngestionError('E_PARSE', `kind "${kind.name}" failed to parse the response`,
+        { cause: err, details: fetchContext() });
     }
 
     if (Date.now() - startedAt > maxDurationMs) {
@@ -224,7 +124,15 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
     pages++;
 
     if (batch.length > 0) {
-      const digest = digestBatch(batch);
+      let digest;
+      try {
+        digest = digestBatch(batch);
+      } catch (err) {
+        // Only a caller kind can get here: JSON.parse and html output always
+        // serialise. A BigInt or a cycle is the kind's bug, not a network one.
+        throw new IngestionError('E_PARSE', `kind "${kind.name}" returned records that cannot be serialised`,
+          { cause: err, details: fetchContext() });
+      }
       if (lastBatchDigest !== null && digest === lastBatchDigest) {
         throw new IngestionError('E_PAGINATION_REPEAT',
           'pagination returned an exact repeat of the previous page — the endpoint may be ignoring the page parameter',
@@ -281,7 +189,7 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
       // this call, including attempts that were later retried/failed --
       // not just the bytes belonging to whichever attempt finally succeeded.
       bytes: budget.bytes, pages, statuses: [...statuses], complete, stop_reason: stopReason, warnings,
-      attempts: totalAttempts, retries: totalRetries,
+      attempts: counters.totalAttempts, retries: counters.totalRetries,
     },
   };
 }

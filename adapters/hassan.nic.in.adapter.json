@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "host": "hassan.nic.in",
+  "access": {
+    "tier": 2,
+    "kind": "html",
+    "url": "https://hassan.nic.in/en/notice_category/recruitment/"
+  },
+  "fetch": {
+    "method": "GET",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (compatible; adapter-ingestion/0.3)"
+    }
+  },
+  "html": {
+    "mode": "select",
+    "rows": "table tbody tr",
+    "fields": {
+      "title": {
+        "selector": "td:nth-child(1)"
+      },
+      "description": {
+        "selector": "td:nth-child(2)"
+      },
+      "opens": {
+        "selector": "td:nth-child(3)"
+      },
+      "closes": {
+        "selector": "td:nth-child(4)"
+      },
+      "file": {
+        "selector": "td:nth-child(5) a",
+        "attr": "href",
+        "resolve_url": true
+      }
+    }
+  },
+  "records_path": "$",
+  "map": {
+    "source_id": {
+      "path": "file"
+    },
+    "url": {
+      "path": "file"
+    },
+    "title": {
+      "path": "title",
+      "normalize": "text"
+    },
+    "description": {
+      "path": "description",
+      "normalize": "text"
+    },
+    "opens": {
+      "path": "opens",
+      "normalize": "text"
+    },
+    "closes": {
+      "path": "closes",
+      "normalize": "text"
+    }
+  },
+  "required": [
+    "source_id",
+    "url",
+    "title"
+  ],
+  "fixtures": [
+    "fixtures/hassan.nic.in/page-1.html"
+  ],
+  "generated_at": "2026-10-18",
+  "generator_model": "claude-opus-5-5",
+  "verified_against_fixtures": "1/1"
+}

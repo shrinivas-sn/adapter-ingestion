@@ -1,10 +1,7 @@
 import { isValidDateOnly } from './normalize.mjs';
+import { builtinKindNames, resolveKind } from './kinds/index.mjs';
 
 const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'bool']);
-// json-api only: feed/html/browser are excluded from this release (see plan.md
-// section 1.3) and must fail validation, not silently pass through to a fetch
-// layer that can only parse JSON.
-const KINDS = new Set(['json-api']);
 const MANDATORY_MAP_KEYS = ['source_id', 'url'];
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 const RESERVED_HOST_BASENAME = /^(CON|NUL|AUX|PRN|COM[1-9]|LPT[1-9])$/i;
@@ -38,7 +35,7 @@ const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
 function checkUnknownKeys(obj, known, label, need) {
   if (!isPlainObject(obj)) return;
   for (const key of Object.keys(obj)) {
-    need(known.has(key), `${label}.${key}: unknown key (typo?)`);
+    need(known.has(key), `${label}.${key}: unknown key (a typo, or a field from a newer version)`);
   }
 }
 
@@ -64,15 +61,21 @@ export function isValidPathString(path) {
   return path.split('.').every((seg) => seg.length > 0);
 }
 
-function validateAccessSection(adapter, need, { requireTier }) {
+function validateAccessSection(adapter, need, { requireTier, kinds }) {
   const access = adapter.access;
   need(isPlainObject(access), 'access is required');
-  if (!isPlainObject(access)) return;
+  if (!isPlainObject(access)) return null;
   checkUnknownKeys(access, KNOWN_ACCESS_KEYS, 'access', need);
   if (requireTier) {
     need(inIntRange(access.tier, 0, 5), 'access.tier must be an integer 0-5');
   }
-  need(KINDS.has(access.kind), `access.kind must be one of ${[...KINDS].join(', ')}`);
+  // Only kinds this engine (or the caller) can actually parse pass; anything
+  // else must fail here rather than reach a fetch layer that cannot decode
+  // it. The message says why that usually happens: an adapter written for a
+  // newer engine, or a custom kind that was not passed in.
+  const kind = resolveKind(access.kind, kinds);
+  need(kind !== null, `access.kind "${access.kind}" is not supported by this engine `
+    + `(${builtinKindNames().join(', ')}); it may need a newer version or a registered kind`);
   need(typeof access.url === 'string', 'access.url is required');
   if (typeof access.url === 'string') {
     let u;
@@ -93,6 +96,7 @@ function validateAccessSection(adapter, need, { requireTier }) {
       );
     }
   }
+  return kind;
 }
 
 function validatePaginationSection(fetchCfg, need) {
@@ -283,7 +287,7 @@ function validateCanary(adapter, need) {
   }
 }
 
-export function validateAdapterConfig(adapter) {
+export function validateAdapterConfig(adapter, { kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
 
@@ -300,17 +304,29 @@ export function validateAdapterConfig(adapter) {
       'host must not use a Windows reserved device name (CON/NUL/AUX/PRN/COM1-9/LPT1-9)');
   }
 
-  validateAccessSection(adapter, need, { requireTier: true });
+  const kind = validateAccessSection(adapter, need, { requireTier: true, kinds });
   validateFetchSection(adapter, need);
   validateRecordsPath(adapter, need);
   validateMap(adapter, need);
   validateRequired(adapter, need);
   validateCanary(adapter, need);
+  // The one top-level key tied to a kind: an html block anywhere else is a
+  // mistake that would otherwise be silently ignored.
+  need(adapter.html === undefined || adapter.access?.kind === 'html',
+    'html is only allowed when access.kind is "html"');
+  // Kind-specific rules last, so the generic errors above read first. A
+  // caller kind's validate() is foreign code: a throw is reported as a plain
+  // validation error, never with its own (possibly sensitive) message.
+  try {
+    kind?.validate(adapter, need);
+  } catch {
+    need(false, `access.kind "${adapter.access.kind}": the kind's validate() threw`);
+  }
 
   return { ok: errors.length === 0, errors };
 }
 
-export function validateFetchConfig(adapter, { since } = {}) {
+export function validateFetchConfig(adapter, { since, kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
 
@@ -318,7 +334,7 @@ export function validateFetchConfig(adapter, { since } = {}) {
     return { ok: false, errors: ['adapter must be an object'] };
   }
 
-  validateAccessSection(adapter, need, { requireTier: false });
+  validateAccessSection(adapter, need, { requireTier: false, kinds });
   validateFetchSection(adapter, need);
 
   if (since !== undefined) {

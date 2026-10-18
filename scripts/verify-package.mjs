@@ -51,6 +51,21 @@ function fail(message, detail) {
 const EXPECTED_TOP_LEVEL = new Set(['package.json', 'LICENSE', 'README.md', 'NOTES-generalization.md', 'MIGRATION-0.2.md']);
 const isExpectedPackedPath = (path) => path.split('/')[0] === 'src' || EXPECTED_TOP_LEVEL.has(path);
 
+// Shared by both consumer scripts: one html page, one row, one relative link.
+const HTML_FIXTURE = String.raw`
+const HTML_ADAPTER = {
+  version: 1, host: 'example.test',
+  access: { tier: 2, kind: 'html', url: 'https://example.test/list/' },
+  html: { mode: 'select', rows: 'table tr', fields: {
+    title: { selector: 'a' }, link: { selector: 'a', attr: 'href', resolve_url: true } } },
+  map: { source_id: { path: 'link' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+  required: ['source_id', 'url', 'title'],
+};
+const HTML_PATHS = { storeFile: 'store-html.jsonl', runsDir: 'runs' };
+const htmlImpl = async () => new Response('<table><tr><td><a href="/a">A</a></td></tr></table>',
+  { headers: { 'content-type': 'text/html; charset=utf-8' } });
+`;
+
 const CONSUMER_SCRIPT = String.raw`
 import assert from 'node:assert/strict';
 import { runIngest } from '@shrinivas-sn/adapter-ingestion';
@@ -64,6 +79,7 @@ import { validateFilter, applyFilter } from '@shrinivas-sn/adapter-ingestion/fil
 import { applyNormalizer, isValidDateOnly } from '@shrinivas-sn/adapter-ingestion/normalize';
 import { buildReport, writeReport, readHistory } from '@shrinivas-sn/adapter-ingestion/report';
 import { readRecords, readLatestRecords, readIndex, appendRecords, withStoreLock } from '@shrinivas-sn/adapter-ingestion/store';
+${HTML_FIXTURE}
 
 // Confirms every import above actually came from the installed package
 // under node_modules -- not a relative src/ fallback or NODE_PATH, which
@@ -125,10 +141,34 @@ assert.equal(validateFilter(filterDef).ok, true);
 const { kept } = applyFilter(latest, filterDef, new Date());
 assert.ok(kept.length >= 1, 'the declarative filter runs against real stored records');
 
+// cheerio is an optional peer: the install above must not have pulled it in,
+// json-api must already have worked without it (it did, above), and an html
+// adapter must fail with the clear install hint rather than a raw import error.
+await assert.rejects(import('cheerio'), (err) => err.code === 'ERR_MODULE_NOT_FOUND');
+await assert.rejects(
+  runIngest({ adapter: HTML_ADAPTER, paths: HTML_PATHS, fetchImpl: htmlImpl, now: new Date() }),
+  (err) => err.code === 'E_KIND_DEPENDENCY' && /npm install cheerio/.test(err.message),
+);
+
 console.log(JSON.stringify({
   ok: true,
-  checks: ['imports-resolve-from-installed-package', 'first', 'replay', 'edit', 'broken-mapping-stale', 'filter'],
+  checks: ['imports-resolve-from-installed-package', 'first', 'replay', 'edit', 'broken-mapping-stale', 'filter', 'html-without-peer'],
 }));
+`;
+
+// Run after cheerio is installed next to the package, the way a consumer opts in.
+const CONSUMER_HTML_SCRIPT = String.raw`
+import assert from 'node:assert/strict';
+import { runIngest } from '@shrinivas-sn/adapter-ingestion';
+import { readRecords } from '@shrinivas-sn/adapter-ingestion/store';
+` + HTML_FIXTURE + String.raw`
+const { report } = await runIngest({ adapter: HTML_ADAPTER, paths: HTML_PATHS, fetchImpl: htmlImpl, now: new Date() });
+assert.equal(report.outcome, 'ok');
+const records = await readRecords(HTML_PATHS.storeFile);
+assert.equal(records.length, 1);
+assert.equal(records[0].source_url, 'https://example.test/a');
+assert.equal(records[0].fields.title, 'A');
+console.log(JSON.stringify({ ok: true, checks: ['html-with-peer'] }));
 `;
 
 async function main() {
@@ -183,6 +223,26 @@ async function main() {
     }
     if (!consumerOutput.ok) fail('consumer script reported failure', consumerResult.stdout);
 
+    // 5b. Opt in to html the way a consumer would: install the optional peer
+    // next to the package, then prove the html kind runs end to end.
+    const peerResult = await npm(
+      ['install', 'cheerio@^1.2.0', '--no-save', '--ignore-scripts', '--package-lock=false', '--no-audit', '--no-fund'],
+      consumerDir,
+    );
+    if (peerResult.code !== 0) fail('npm install of the optional cheerio peer failed', peerResult.stderr);
+    await writeFile(join(consumerDir, 'consumer-html.mjs'), CONSUMER_HTML_SCRIPT);
+    const htmlResult = await node([join(consumerDir, 'consumer-html.mjs')], consumerDir);
+    if (htmlResult.code !== 0) {
+      fail('the html consumer script (with cheerio) failed', htmlResult.stderr || htmlResult.stdout);
+    }
+    let htmlOutput;
+    try {
+      htmlOutput = JSON.parse(htmlResult.stdout.trim().split('\n').pop());
+    } catch {
+      fail('html consumer script produced unparseable output', htmlResult.stdout);
+    }
+    if (!htmlOutput.ok) fail('html consumer script reported failure', htmlResult.stdout);
+
     // 6. Confirm import + install alone had no CLI side effect: the only
     // files under the consumer directory are what npm install put there,
     // the consumer script itself, and what the consumer script explicitly
@@ -191,7 +251,7 @@ async function main() {
     const unexpectedWrites = allEntries.filter((p) => {
       const top = p.split(/[\\/]/)[0];
       return top !== 'node_modules' && p !== 'package.json' && p !== 'consumer.mjs'
-        && p !== 'store.jsonl' && top !== 'runs';
+        && p !== 'consumer-html.mjs' && p !== 'store.jsonl' && p !== 'store-html.jsonl' && top !== 'runs';
     });
     if (unexpectedWrites.length > 0) fail('unexpected files written by import/install alone', unexpectedWrites.join('\n'));
 
@@ -199,7 +259,7 @@ async function main() {
       tarball: packInfo.filename, version: packInfo.version, integrity: packInfo.integrity,
       shasum: packInfo.shasum, entryCount: packInfo.entryCount,
       files: packInfo.files.map((f) => f.path).sort(),
-      consumerChecks: consumerOutput.checks,
+      consumerChecks: [...consumerOutput.checks, ...htmlOutput.checks],
       platform: process.platform, nodeVersion: process.version,
     };
     console.log('verify-package: PASS');
