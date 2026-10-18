@@ -12,6 +12,8 @@ import { splitByIndex } from './dedupe.mjs';
 import { buildReport, writeReport, readEligibleHistory } from './report.mjs';
 import { checkCanary } from './canary.mjs';
 import { collectNotices } from './notices.mjs';
+import { historySummary, readHistoryFile, appendHistory } from './history.mjs';
+import { resolve } from 'node:path';
 import { IngestionError, safeFailure, addSecondaryError } from './errors.mjs';
 
 const MAX_WARNING_SAMPLES = 20;
@@ -82,11 +84,16 @@ function isEligibleForMedian(candidate, { host, fingerprint, startedAtIso }) {
 // - primaryError exists, write also fails -> primaryError is still what's
 //   rethrown (never replaced); the write failure rides along as a safe
 //   secondary detail.
-async function finalizeReport(runsDir, reportFields, primaryError) {
+//
+// `history` ({ file, keep }) is passed only by in-lock exits: the history
+// file is appended after the report, under the same lock, and a failure to
+// append follows exactly the same precedence as a failed report write.
+async function finalizeReport(runsDir, reportFields, primaryError, history = null) {
   const report = buildReport(reportFields);
   let writeErr = null;
   try {
     await writeReport(runsDir, report);
+    if (history) await appendHistory(history.file, historySummary(report), { keep: history.keep });
   } catch (err) {
     writeErr = err;
   }
@@ -122,6 +129,14 @@ function validateRunOptions({ paths, now, signal, kinds }) {
   }
   if (signal !== undefined && !(signal instanceof AbortSignal)) {
     throw new IngestionError('E_OPTIONS', 'signal must be an AbortSignal');
+  }
+  if (paths.historyFile !== undefined) {
+    if (typeof paths.historyFile !== 'string' || paths.historyFile.length === 0) {
+      throw new IngestionError('E_OPTIONS', 'paths.historyFile must be a nonempty string');
+    }
+    if (resolve(paths.historyFile) === resolve(paths.storeFile)) {
+      throw new IngestionError('E_OPTIONS', 'paths.historyFile must differ from paths.storeFile');
+    }
   }
   validateKindsOption(kinds);
 }
@@ -219,10 +234,15 @@ async function canaryStage(ctx) {
   ctx.stage = 'canary';
   const { adapter, mode, host, fingerprint, startedAtIso } = ctx;
   const medianWindow = adapter.canary?.median_window ?? 5;
-  const eligibleHistory = mode === 'snapshot'
-    ? await readEligibleHistory(ctx.runsDir, medianWindow,
-      (candidate) => isEligibleForMedian(candidate, { host, fingerprint, startedAtIso }))
-    : [];
+  const isEligible = (candidate) => isEligibleForMedian(candidate, { host, fingerprint, startedAtIso });
+  // With a history file, it is the only history source: runs/ may be a
+  // fresh, empty checkout, and mixing both could count a run twice.
+  let eligibleHistory = [];
+  if (mode === 'snapshot') {
+    eligibleHistory = ctx.historyFile
+      ? await readHistoryFile(ctx.historyFile, medianWindow, isEligible, { onWarning: ctx.pushWarning })
+      : await readEligibleHistory(ctx.runsDir, medianWindow, isEligible);
+  }
 
   ctx.historyCount = eligibleHistory.length;
   const canaryInput = { stages: ctx.stages, mode, newest_staleness_value: ctx.newestStalenessValue };
@@ -246,6 +266,9 @@ function inLockReportFields(ctx) {
 // lock. A failure anywhere in here -- including the success report's own
 // write -- is finalized as a fatal report at the stage it reached.
 async function lockedRun(ctx) {
+  const history = ctx.historyFile
+    ? { file: ctx.historyFile, keep: Math.max(50, 2 * (ctx.adapter.canary?.median_window ?? 5)) }
+    : null;
   try {
     const items = await fetchStage(ctx);
     const records = extractStage(ctx, items);
@@ -255,8 +278,8 @@ async function lockedRun(ctx) {
       ...inLockReportFields(ctx),
       outcome: canary.status === 'stale' ? 'stale' : 'ok',
       canary,
-      notices: collectNotices(ctx.adapter, { mode: ctx.mode, historyCount: ctx.historyCount, usesHistoryFile: false }),
-    }, null);
+      notices: collectNotices(ctx.adapter, { mode: ctx.mode, historyCount: ctx.historyCount, usesHistoryFile: Boolean(ctx.historyFile) }),
+    }, null, history);
   } catch (err) {
     return finalizeReport(ctx.runsDir, {
       ...inLockReportFields(ctx),
@@ -265,7 +288,7 @@ async function lockedRun(ctx) {
       canary: notEvaluatedCanary(),
       // No run facts survive a fatal run, so only adapter-level rules apply.
       notices: collectNotices(ctx.adapter, null),
-    }, err);
+    }, err, history);
   }
 }
 
@@ -303,7 +326,7 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, kind
   try {
     return await withStoreLock(paths.storeFile, { runId }, async (canonicalStoreFile) => {
       const ctx = newRunContext({
-        adapter, since, fetchImpl, signal, kinds, now, store, runsDir,
+        adapter, since, fetchImpl, signal, kinds, now, store, runsDir, historyFile: paths.historyFile,
         runId, host, fingerprint, mode, startedAtIso, finishedAtIso, canonicalStoreFile,
       });
       const finalized = await lockedRun(ctx);
