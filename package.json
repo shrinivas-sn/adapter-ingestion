@@ -27,6 +27,7 @@
   "files": [
     "src",
     "schema",
+    "types",
     "README.md",
     "NOTES-generalization.md",
     "MIGRATION-0.2.md",
@@ -34,17 +35,50 @@
     "UPGRADING.md"
   ],
   "exports": {
-    ".": "./src/run.mjs",
-    "./adapter": "./src/adapter.mjs",
-    "./canary": "./src/canary.mjs",
-    "./contract": "./src/contract.mjs",
-    "./dedupe": "./src/dedupe.mjs",
-    "./extract": "./src/extract.mjs",
-    "./fetch": "./src/fetch.mjs",
-    "./filter": "./src/filter.mjs",
-    "./normalize": "./src/normalize.mjs",
-    "./report": "./src/report.mjs",
-    "./store": "./src/store.mjs",
+    ".": {
+      "types": "./types/run.d.mts",
+      "default": "./src/run.mjs"
+    },
+    "./adapter": {
+      "types": "./types/adapter.d.mts",
+      "default": "./src/adapter.mjs"
+    },
+    "./canary": {
+      "types": "./types/canary.d.mts",
+      "default": "./src/canary.mjs"
+    },
+    "./contract": {
+      "types": "./types/contract.d.mts",
+      "default": "./src/contract.mjs"
+    },
+    "./dedupe": {
+      "types": "./types/dedupe.d.mts",
+      "default": "./src/dedupe.mjs"
+    },
+    "./extract": {
+      "types": "./types/extract.d.mts",
+      "default": "./src/extract.mjs"
+    },
+    "./fetch": {
+      "types": "./types/fetch.d.mts",
+      "default": "./src/fetch.mjs"
+    },
+    "./filter": {
+      "types": "./types/filter.d.mts",
+      "default": "./src/filter.mjs"
+    },
+    "./normalize": {
+      "types": "./types/normalize.d.mts",
+      "default": "./src/normalize.mjs"
+    },
+    "./report": {
+      "types": "./types/report.d.mts",
+      "default": "./src/report.mjs"
+    },
+    "./store": {
+      "types": "./types/store.d.mts",
+      "default": "./src/store.mjs"
+    },
     "./adapter.schema.json": "./schema/adapter.schema.json"
   },
   "scripts": {
@@ -53,7 +87,9 @@
     "ingest": "node src/run.mjs",
     "changeset": "changeset",
     "version": "changeset version && npm install --package-lock-only",
-    "release": "changeset publish"
+    "release": "changeset publish",
+    "build:types": "tsc -p tsconfig.json",
+    "prepack": "npm run build:types"
   },
   "devDependencies": {
     "@changesets/cli": "^3.0.0",

@@ -59,7 +59,8 @@ test('exports surface: every package subpath exposes exactly the frozen names', 
       assert.equal(json.$schema, 'https://json-schema.org/draft/2020-12/schema', `exports of "${subpath}"`);
       continue;
     }
-    const mod = await import(new URL(target, ROOT));
+    // A conditional target ({ types, default }) runs its `default` file.
+    const mod = await import(new URL(typeof target === 'string' ? target : target.default, ROOT));
     assert.deepEqual(Object.keys(mod).sort(), EXPORTS[subpath], `exports of "${subpath}"`);
   }
 });

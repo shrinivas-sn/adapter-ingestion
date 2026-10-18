@@ -16,6 +16,18 @@ import { historySummary, readHistoryFile, appendHistory } from './history.mjs';
 import { resolve } from 'node:path';
 import { IngestionError, safeFailure, addSecondaryError } from './errors.mjs';
 
+// Type-only re-exports for TypeScript users (no runtime export): the shapes
+// of runIngest's options and result, and the documents it reads and writes.
+/** @typedef {import('./types.mjs').Adapter} Adapter */
+/** @typedef {import('./types.mjs').Kind} Kind */
+/** @typedef {import('./types.mjs').RunPaths} RunPaths */
+/** @typedef {import('./types.mjs').RunIngestOptions} RunIngestOptions */
+/** @typedef {import('./types.mjs').RunResult} RunResult */
+/** @typedef {import('./types.mjs').Report} Report */
+/** @typedef {import('./types.mjs').Notice} Notice */
+/** @typedef {import('./types.mjs').CanaryResult} CanaryResult */
+/** @typedef {import('./types.mjs').StoreRecord} StoreRecord */
+
 const MAX_WARNING_SAMPLES = 20;
 
 function newestValueOf(records, fieldName) {
