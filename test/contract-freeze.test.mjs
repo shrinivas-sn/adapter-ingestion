@@ -38,10 +38,13 @@ const ERROR_CODES = [
 
 const REPORT_KEYS = [
   'adapter_fingerprint', 'canary', 'duration_ms', 'error_count', 'errors', 'failure',
-  'fatal_error', 'fetch', 'finished_at', 'host', 'mode', 'newest_staleness_value', 'outcome',
+  'fatal_error', 'fetch', 'finished_at', 'host', 'mode', 'newest_staleness_value', 'notices', 'outcome',
   'report_version', 'run_id', 'secondary_errors', 'stages', 'started_at', 'storage',
   'warning_count', 'warnings',
 ];
+
+// A_* advice and D_* deprecation notice codes (src/notices.mjs).
+const NOTICE_CODES = ['A_CANARY_NO_HISTORY'];
 
 const RECORD_KEYS = ['content_hash', 'fetched_at', 'fields', 'id', 'raw', 'source_host', 'source_url'];
 
@@ -63,6 +66,17 @@ test('error codes: the set of E_* codes in src/ is frozen', async () => {
     for (const m of text.matchAll(/'(E_[A-Z_]+)'/g)) codes.add(m[1]);
   }
   assert.deepEqual([...codes].sort(), ERROR_CODES);
+});
+
+test('notice codes: the set of A_*/D_* codes in src/ is frozen', async () => {
+  const srcDir = new URL('src/', ROOT);
+  const files = (await readdir(srcDir, { recursive: true })).filter((f) => f.endsWith('.mjs'));
+  const codes = new Set();
+  for (const f of files) {
+    const text = await readFile(new URL(f.replaceAll('\\', '/'), srcDir), 'utf8');
+    for (const m of text.matchAll(/'([AD]_[A-Z_]+)'/g)) codes.add(m[1]);
+  }
+  assert.deepEqual([...codes].sort(), NOTICE_CODES);
 });
 
 test('report v2 keys: buildReport top-level keys are frozen', () => {

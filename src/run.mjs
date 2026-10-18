@@ -11,6 +11,7 @@ import { readIndex, appendRecords, withStoreLock } from './store.mjs';
 import { splitByIndex } from './dedupe.mjs';
 import { buildReport, writeReport, readEligibleHistory } from './report.mjs';
 import { checkCanary } from './canary.mjs';
+import { collectNotices } from './notices.mjs';
 import { IngestionError, safeFailure, addSecondaryError } from './errors.mjs';
 
 const MAX_WARNING_SAMPLES = 20;
@@ -223,6 +224,7 @@ async function canaryStage(ctx) {
       (candidate) => isEligibleForMedian(candidate, { host, fingerprint, startedAtIso }))
     : [];
 
+  ctx.historyCount = eligibleHistory.length;
   const canaryInput = { stages: ctx.stages, mode, newest_staleness_value: ctx.newestStalenessValue };
   return checkCanary(canaryInput, eligibleHistory, adapter.canary ?? {}, { now: ctx.now });
 }
@@ -253,6 +255,7 @@ async function lockedRun(ctx) {
       ...inLockReportFields(ctx),
       outcome: canary.status === 'stale' ? 'stale' : 'ok',
       canary,
+      notices: collectNotices(ctx.adapter, { mode: ctx.mode, historyCount: ctx.historyCount, usesHistoryFile: false }),
     }, null);
   } catch (err) {
     return finalizeReport(ctx.runsDir, {
@@ -260,6 +263,8 @@ async function lockedRun(ctx) {
       outcome: err.code === 'E_ABORTED' ? 'aborted' : 'error',
       failure: safeFailure(err, ctx.stage),
       canary: notEvaluatedCanary(),
+      // No run facts survive a fatal run, so only adapter-level rules apply.
+      notices: collectNotices(ctx.adapter, null),
     }, err);
   }
 }

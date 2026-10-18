@@ -57,6 +57,12 @@ test('golden: ok snapshot run', async (t) => {
     canary: { status: 'ok', breaches: [], skipped: [{ check: 'count_drop_ratio', reason: 'no_history' }, { check: 'staleness', reason: 'not_configured' }] },
     fetch: { pages: 1, attempts: 1, retries: 0, statuses: [200], status_count: 1, bytes: report.fetch.bytes, complete: true, stop_reason: 'single_page' },
     storage: { status: 'committed', written: 2 },
+    notices: [{
+      code: 'A_CANARY_NO_HISTORY', kind: 'advice',
+      message: 'count_drop_ratio was skipped: no comparable past runs were found. On CI with a fresh checkout this repeats every run; set paths.historyFile to a committed file.',
+      since: '0.4.0', docs: 'https://github.com/shrinivas-sn/adapter-ingestion/blob/main/README.md#canary-history-on-ci',
+      path: 'canary.count_drop_ratio',
+    }],
   });
   assert.match(report.adapter_fingerprint, /^[0-9a-f]{64}$/);
   assert.ok(report.fetch.bytes > 0);
@@ -78,6 +84,7 @@ test('golden: stale run via count_drop_ratio against eligible history', async (t
     canary: { status: 'stale', breaches: ['count_drop_ratio: parsed 2 vs trailing median 10'], skipped: [{ check: 'staleness', reason: 'not_configured' }] },
     fetch: { pages: 1, attempts: 1, retries: 0, statuses: [200], status_count: 1, bytes: report.fetch.bytes, complete: true, stop_reason: 'single_page' },
     storage: { status: 'unchanged', written: 0 },
+    notices: [],
   });
 });
 
@@ -96,6 +103,7 @@ test('golden: invalid adapter', async (t) => {
     canary: { status: 'not_evaluated', breaches: [], skipped: [] },
     fetch: { pages: 0, attempts: 0, retries: 0, statuses: [], status_count: 0, bytes: 0, complete: false, stop_reason: null },
     storage: { status: 'not_started', written: 0 },
+    notices: [],
   });
 });
 
@@ -117,6 +125,7 @@ test('golden: HTTP 500 fails the fetch stage', async (t) => {
     canary: { status: 'not_evaluated', breaches: [], skipped: [] },
     fetch: { pages: 0, attempts: 0, retries: 0, statuses: [], status_count: 0, bytes: 0, complete: false, stop_reason: null },
     storage: { status: 'not_started', written: 0 },
+    notices: [],
   });
 });
 
@@ -136,5 +145,6 @@ test('golden: store already locked', async (t) => {
     canary: { status: 'not_evaluated', breaches: [], skipped: [] },
     fetch: { pages: 0, attempts: 0, retries: 0, statuses: [], status_count: 0, bytes: 0, complete: false, stop_reason: null },
     storage: { status: 'not_started', written: 0 },
+    notices: [],
   });
 });

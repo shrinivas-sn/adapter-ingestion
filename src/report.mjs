@@ -23,6 +23,7 @@ export function buildReport({
   canary = { status: 'not_evaluated', breaches: [], skipped: [] },
   fetchDiagnostics = null,
   storage = { status: 'not_started', written: 0 },
+  notices = [],
 }) {
   const statuses = fetchDiagnostics?.statuses ?? [];
   return {
@@ -59,6 +60,9 @@ export function buildReport({
       stop_reason: fetchDiagnostics?.stop_reason ?? null,
     },
     storage,
+    // Advice and deprecations for this adapter (notices.mjs). Additive to
+    // report v2: information only, never an input to outcome.
+    notices,
   };
 }
 
