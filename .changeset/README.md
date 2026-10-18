@@ -6,3 +6,28 @@ find the full documentation for it [in our repository](https://github.com/change
 
 We have a quick list of common questions to get you started engaging with this project in
 [our documentation](https://github.com/changesets/changesets/blob/main/docs/common-questions.md)
+
+## Writing a changeset for this repo
+
+Every changeset body uses the same three headings as [UPGRADING.md](../UPGRADING.md), so the
+changelog and the upgrade guide always agree. Write "None." under an empty heading.
+
+```md
+---
+"@shrinivas-sn/adapter-ingestion": minor
+---
+
+One line saying what this release is about.
+
+No changes needed:
+- What you get just by upgrading.
+
+Opt in:
+- A new capability, and the one change that turns it on.
+
+Action needed:
+- None.
+```
+
+A change to a list in `test/contract-freeze.test.mjs` is a public contract change: say which
+list changed and why.
