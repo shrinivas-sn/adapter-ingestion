@@ -66,9 +66,25 @@ test('history in runs: a history write failure is E_REPORT_WRITE with the report
   const blocker = join(dir, 'not-a-dir');
   await writeFile(blocker, 'x');
   const historyFile = join(blocker, 'h.jsonl');
-  await assert.rejects(runIngest({ adapter, paths: { ...paths, historyFile }, fetchImpl: impl(itemsOf(2)), now: at(1) }), (err) => {
+  // Incremental: the canary reads no history, so only the append can fail.
+  // (A snapshot run would fail earlier on POSIX, reading a path under a
+  // file -- ENOTDIR, E_REPORT_READ -- which the next test covers.)
+  const incremental = { ...adapter, fetch: { ...adapter.fetch, incremental: { param: 'since', type: 'iso-date' } } };
+  await assert.rejects(runIngest({ adapter: incremental, paths: { ...paths, historyFile }, since: '2026-01-01', fetchImpl: impl(itemsOf(2)), now: at(1) }), (err) => {
     assert.equal(err.code, 'E_REPORT_WRITE');
     assert.ok(err.report, 'report attached');
+    return true;
+  });
+});
+
+test('history in runs: an unreadable history file fails the snapshot run, never silently empty', async (t) => {
+  const { dir, paths } = await tmpPaths(t);
+  // A directory where the file should be: unreadable on every platform (EISDIR).
+  const historyFile = join(dir, 'history-dir');
+  await mkdir(historyFile);
+  await assert.rejects(runIngest({ adapter, paths: { ...paths, historyFile }, fetchImpl: impl(itemsOf(2)), now: at(1) }), (err) => {
+    assert.equal(err.code, 'E_REPORT_READ');
+    assert.equal(err.report.failure.stage, 'canary');
     return true;
   });
 });

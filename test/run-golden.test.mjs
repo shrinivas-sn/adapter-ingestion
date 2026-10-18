@@ -3,7 +3,7 @@
 // Only run_id, finished_at, duration_ms and the temp directory are masked.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { runIngest } from '../src/run.mjs';
@@ -22,9 +22,13 @@ const itemsOf = (n) => Array.from({ length: n }, (_, i) => ({ id: i + 1, link: `
 const jsonImpl = (body, status = 200) => async () => new Response(JSON.stringify(body), { status });
 const at = (s) => new Date(`2026-01-01T00:00:${String(s).padStart(2, '0')}.000Z`);
 
+// The lock reports its canonical path (realpath), which differs from
+// tmpdir() on a runner whose temp dir is a Windows 8.3 short name; the real
+// path is what gets masked.
 async function tmpPaths(t) {
-  const dir = await mkdtemp(join(tmpdir(), 'golden-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const created = await mkdtemp(join(tmpdir(), 'golden-'));
+  t.after(() => rm(created, { recursive: true, force: true }));
+  const dir = await realpath(created);
   return { dir, paths: { storeFile: join(dir, 'store.jsonl'), runsDir: join(dir, 'runs') } };
 }
 
