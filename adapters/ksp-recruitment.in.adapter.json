@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "host": "ksp-recruitment.in",
+  "access": {
+    "tier": 2,
+    "kind": "html",
+    "url": "https://ksp-recruitment.in/"
+  },
+  "fetch": {
+    "method": "GET",
+    "headers": {
+      "User-Agent": "Mozilla/5.0 (compatible; adapter-ingestion/0.3)"
+    }
+  },
+  "html": {
+    "mode": "select",
+    "rows": "#recruitment-details table tbody tr",
+    "fields": {
+      "notification": {
+        "selector": "td:nth-child(2)"
+      },
+      "posts": {
+        "selector": "td:nth-child(3)"
+      },
+      "count": {
+        "selector": "td:nth-child(4)"
+      },
+      "opens": {
+        "selector": "td:nth-child(5)"
+      },
+      "closes": {
+        "selector": "td:nth-child(6)"
+      },
+      "apply": {
+        "selector": "td:nth-child(8) a",
+        "attr": "href",
+        "resolve_url": true
+      }
+    }
+  },
+  "records_path": "$",
+  "map": {
+    "source_id": {
+      "path": "notification"
+    },
+    "url": {
+      "path": "apply"
+    },
+    "title": {
+      "path": "posts",
+      "normalize": "text"
+    },
+    "post_count": {
+      "path": "count",
+      "normalize": "text"
+    },
+    "opens": {
+      "path": "opens",
+      "normalize": "text"
+    },
+    "closes": {
+      "path": "closes",
+      "normalize": "text"
+    }
+  },
+  "required": [
+    "source_id",
+    "url",
+    "title"
+  ],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.5,
+    "required_field_ratio": 0.9
+  },
+  "fixtures": [
+    "fixtures/ksp-recruitment.in/page-1.html"
+  ],
+  "generated_at": "2026-10-18",
+  "generator_model": "claude-opus-5-5",
+  "verified_against_fixtures": "6/6"
+}
