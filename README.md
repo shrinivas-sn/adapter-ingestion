@@ -5,8 +5,9 @@
 [![node](https://img.shields.io/node/v/@shrinivas-sn/adapter-ingestion)](package.json)
 [![license](https://img.shields.io/npm/l/@shrinivas-sn/adapter-ingestion)](LICENSE)
 
-Keeps a Node app supplied with fresh records from JSON sources on a schedule. That covers
-official APIs and the JSON endpoints many sites expose without advertising them as an API.
+Keeps a Node app supplied with fresh records from JSON APIs and server-rendered HTML pages
+on a schedule. That covers official APIs, the JSON endpoints many sites expose without
+advertising them as an API, and plain HTML listings read with CSS selectors.
 An adapter is a small JSON config written once per source, and a plain-rules runner applies
 it on every cron at zero LLM cost. A relevance filter is a read-time view over stored
 records, never a write-time gate. A canary flags a stale adapter, loudly, when a source
@@ -17,8 +18,8 @@ Requires **Node 22.15.0 or newer**. Upgrading from 0.1.x? See [MIGRATION-0.2.md]
 
 ## Is this for you?
 
-**Use it if** you are in Node and want scheduled JSON pulls into a plain file store with
-no database. You also get change detection (fresh / changed / unchanged) and an alarm when
+**Use it if** you are in Node and want scheduled JSON or HTML pulls into a plain file store
+with no database. You also get change detection (fresh / changed / unchanged) and an alarm when
 a source goes quiet or changes shape.
 
 **Look elsewhere if:**
@@ -27,12 +28,14 @@ a source goes quiet or changes shape.
   [dlt](https://github.com/dlt-hub/dlt)'s REST API source.
 - You want no-code "watch this and notify me" agents. Use
   [Huginn](https://github.com/huginn/huginn).
-- You need HTML scraping, POST, GraphQL, or OAuth. This package does not do them yet (see
-  [Non-goals](#non-goals)).
+- You need POST, GraphQL, OAuth, or pages that only render in a browser. This package does
+  not do them (see [Non-goals](#non-goals)).
 
-**What it ingests today:** JSON over HTTP GET. CSV or other formats work through a
-`fetchImpl` you supply that converts the body and returns a real `Response` carrying JSON.
-`runIngest` passes it the same `(url, init)` arguments as global `fetch`.
+**What it ingests today** (HTTP GET, see [Source kinds](#source-kinds)):
+- JSON (`json-api`).
+- HTML pages (`html`): rows picked by CSS selectors, or the JSON inside a `<script>` such
+  as JSON-LD or `__NEXT_DATA__`. Needs the optional `cheerio` package.
+- Any other format (CSV, XML, ...) through a `kinds` parser you register.
 
 ```
   generator (once, per source)  ->  adapter file
@@ -58,6 +61,9 @@ npm install @shrinivas-sn/adapter-ingestion
 **The published package ships only the generic engine** (`src/`, plus this README and
 `MIGRATION-0.2.md`) — no adapters, fixtures, or scripts. You bring your own adapter JSON
 and call `runIngest` against it from your own code.
+
+The core has no runtime dependencies. For `access.kind: "html"`, also install the optional
+peer once: `npm install cheerio`. JSON-only users never need it.
 
 ## Quick start
 
@@ -149,17 +155,22 @@ Every function below has a stable input/output/error contract. `error.code` is a
 of the `E_*` constants named per function.
 
 **Root (`@shrinivas-sn/adapter-ingestion`)**
-- `runIngest({ adapter, paths, since, fetchImpl, signal, now = new Date(), store })` →
+- `runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store })` →
   `Promise<{ report, canary }>` on success (including a `stale` canary — that's not a
   failure). Rejects with an `IngestionError` (`err.code`, `err.message`, `err.report`) on a
   config, transport, storage, lock, cancellation, or reporting failure. `paths.storeFile`/
   `paths.runsDir` are required nonempty strings. `since` (a `YYYY-MM-DD` string) switches to
   incremental mode and requires `adapter.fetch.incremental` to be configured. `signal` (an
   `AbortSignal`) cancels an in-flight fetch/wait; a cancellation that lands after the store
-  append already committed does not roll back that commit.
+  append already committed does not roll back that commit. `kinds` registers your own
+  formats (see [Source kinds](#source-kinds)); a malformed one is `E_OPTIONS`.
+- Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a registered kind threw),
+  `E_PARSE_NO_MATCH` (`html.script` matched nothing), `E_KIND_DEPENDENCY` (`html` without
+  `cheerio` installed).
 
 **`/adapter`**
-- `validateAdapter(adapter)` → `{ ok: boolean, errors: string[] }`. Never throws.
+- `validateAdapter(adapter, { kinds }?)` → `{ ok: boolean, errors: string[] }`. Never
+  throws. Pass the same `kinds` you give `runIngest` so a custom kind validates.
 - `verifyAgainstFixtures(adapter, fixtureItems)` → `{ total, parsed, ratio, fieldFailures }`
   — run this against real fetched samples before trusting a generated adapter.
 
@@ -182,8 +193,8 @@ of the `E_*` constants named per function.
   to fail before this point instead.
 
 **`/fetch`**
-- `fetchAll(adapter, { since, fetchImpl = fetch, signal }?)` → `Promise<{ items, pages,
-  statuses, diagnostics }>`. `fetchImpl` must resolve with a real `Response`.
+- `fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds }?)` → `Promise<{ items,
+  pages, statuses, diagnostics }>`. `fetchImpl` must resolve with a real `Response`.
 
 **`/canary`**
 - `checkCanary(report, history, cfg, { now = new Date() }?)` → `{ status: 'ok'|'stale',
@@ -230,6 +241,78 @@ provenance guarantee, not a formality: it's what makes a record's `source_host` 
 `fetch.pagination` (optional): `{ style: 'page-param', param, per_page?, per_page_param?,
 max_pages?, allow_truncation? }`. Hitting `max_pages` on a still-full-looking page is a
 hard failure unless `allow_truncation: true`.
+
+## Source kinds
+
+`access.kind` says how a response body becomes records. Parsing happens after the bounded
+read, so every kind gets the same transport rules: timeouts, byte caps, retries, no
+redirects, pagination and repeat-page checks, `max_records`, and the canary.
+
+**`json-api`**: the body is JSON; `records_path` points at the array of records.
+
+**`html`**: server-rendered pages. Install the optional peer first (`npm install cheerio`);
+without it, an html adapter fails with `E_KIND_DEPENDENCY`. Selectors are data in the
+adapter, never code. An unsupported selector (such as `:hover`) fails as
+`E_ADAPTER_INVALID`, naming the field. The data must be in the server's first response:
+pages that only fill in through JavaScript are not supported.
+
+- `select` mode: one record per element matching `rows`. A field is the trimmed text of the
+  first element matching its `selector` inside the row (no `selector` means the row itself),
+  or that element's `attr`. A missing element or empty value is `null`. With
+  `resolve_url: true` the value becomes an absolute URL against the page URL; anything but
+  `http`/`https` (such as `javascript:` or `mailto:`) becomes `null`. `records_path` must be
+  `"$"`.
+
+  ```json
+  "access": { "tier": 2, "kind": "html", "url": "https://news.ycombinator.com/" },
+  "html": {
+    "mode": "select",
+    "rows": "tr.athing",
+    "fields": {
+      "id":    { "attr": "id" },
+      "title": { "selector": ".titleline > a" },
+      "link":  { "selector": ".titleline > a", "attr": "href", "resolve_url": true }
+    }
+  },
+  "records_path": "$",
+  "map": { "source_id": { "path": "id" }, "url": { "path": "link" }, "title": { "path": "title", "normalize": "text" } }
+  ```
+
+- `script_json` mode: `{ "mode": "script_json", "script": "script#__NEXT_DATA__" }`. The
+  JSON inside the first matching element becomes the body, and `records_path` and `map` work
+  as for `json-api`. To pick one of several JSON-LD blocks, match on content:
+  `script[type="application/ld+json"]:contains("ItemList")`. No match is `E_PARSE_NO_MATCH`;
+  invalid JSON is `E_RESPONSE_JSON`.
+
+Encoding is detected from the raw bytes: a byte-order mark first, then the `Content-Type`
+charset, then `<meta charset>`. With none of these, the page is read as UTF-8. Legacy
+encodings such as windows-1252, KOI8-R or Shift_JIS decode correctly.
+
+The repository's `adapters/` folder has worked html examples for seven sites on different
+platforms, each with its recorded page under `fixtures/`.
+
+**Your own format (`kinds`)**: register a parser and name it in `access.kind`.
+
+```js
+const csv = {
+  // Bytes in, an array of plain objects out (sync or async).
+  parse({ bytes }) {
+    const [header, ...lines] = bytes.toString('utf8').trim().split('\n');
+    const keys = header.split(',');
+    return lines.map((line) => Object.fromEntries(line.split(',').map((v, i) => [keys[i], v])));
+  },
+  // Optional: extra adapter checks, reported like built-in ones.
+  validate(adapter, need) { need(adapter.records_path === '$', 'csv adapters use records_path "$"'); },
+};
+
+// adapter.access = { tier: 1, kind: 'csv', url: 'https://example.test/data.csv' }
+await runIngest({ adapter, paths, kinds: { csv } });
+```
+
+`parse` receives `{ bytes, contentType, url, adapter }`. A name that shadows a built-in kind
+is `E_OPTIONS`. If `parse` throws, the run fails with `E_PARSE` and a generic message: your
+error's text never reaches a report (it stays on `err.cause`). A result that is not the array
+`records_path` expects fails with `E_RESPONSE_SHAPE`, as for JSON.
 
 ## Writing a filter
 
@@ -281,16 +364,22 @@ notices respectively. `canary.breaches` names which threshold tripped
   `min_records`, `required_field_ratio` and `staleness` need no history.
 - **A UA-only bot gate shows up as a 403 with a default agent, 200 with a browser UA** —
   probe both when writing a new adapter.
+- **Redirects are not followed.** A 301 or 302 fails as `E_REDIRECT`. Put the final URL in
+  `access.url` (check it with `curl -sI <url>`).
+- **Records that share a `source_id` within one run collapse to one** (the last one wins). A
+  page that lists the same link twice, such as a menu plus the body, reports more `fetched`
+  than `fresh` + `changed` + `unchanged`.
 - **No cross-source fuzzy dedupe** (within-source only, by design — see Non-goals).
 
 ## Non-goals
 
-Not a general-purpose scraper, not a dashboard/analytics/storage product, not a hosted
-service. Doesn't own what a consuming app does with ingested data. No cross-source fuzzy
+Not a crawler or a general-purpose scraper: one adapter reads one listing URL (plus its
+pages). Not a dashboard/analytics/storage product, not a hosted service. Doesn't own what a consuming app does with ingested data. No cross-source fuzzy
 dedupe (within-source only, v1). No unattended LLM regeneration — a stale canary alerts; a
 human re-runs whatever generated the adapter. No distributed/networked locking — one local
 store, one physical lock file, cooperative single-machine exclusion only. No POST/GraphQL/
-auth/OAuth (JSON GET only, this release).
+auth/OAuth (GET only). No headless browser: pages that only render through JavaScript are
+out of scope.
 
 ## Project status and roadmap
 
