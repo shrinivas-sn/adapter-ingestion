@@ -24,7 +24,7 @@
       "minLength": 1,
       "maxLength": 253,
       "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
-      "description": "Bare hostname of the source. access.url must be on this host or a subdomain; it also names store/<host>.jsonl and runs/<host>/."
+      "description": "The exact hostname of access.url (keep a leading www. if the URL has it). access.url must be on this host or a subdomain. It names store/<host>.jsonl, runs/<host>/ and every record id (<host>:<source_id>), so changing it later starts a new store."
     },
     "access": {
       "$ref": "#/$defs/access"
@@ -35,7 +35,7 @@
     "records_path": {
       "type": "string",
       "minLength": 1,
-      "description": "Dot-path to the array of records in the parsed body; \"$\" is the body itself."
+      "description": "Dot-path to the array of records in the parsed body. Default \"$\": the body itself is the array."
     },
     "map": {
       "type": "object",
