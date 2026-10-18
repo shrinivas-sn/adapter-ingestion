@@ -24,7 +24,7 @@ export const RULES = Object.freeze([
       if (facts?.mode !== 'snapshot' || facts.historyCount !== 0 || facts.usesHistoryFile === true) return [];
       return [{
         path: 'canary.count_drop_ratio',
-        message: 'count_drop_ratio was skipped: no comparable past runs were found. On CI with a fresh checkout this repeats every run; set paths.historyFile to a committed file.',
+        message: 'count_drop_ratio has no comparable past runs to compare with. On CI with a fresh checkout this happens on every run; set paths.historyFile (CLI: --history) to a file you commit.',
       }];
     },
   },

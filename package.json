@@ -34,7 +34,8 @@
     "VERSIONING.md",
     "UPGRADING.md",
     "AGENTS.md",
-    "llms.txt"
+    "llms.txt",
+    "CHANGELOG.md"
   ],
   "exports": {
     ".": {

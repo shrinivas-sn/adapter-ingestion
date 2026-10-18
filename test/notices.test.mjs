@@ -15,7 +15,7 @@ test('notices: A_CANARY_NO_HISTORY fires for a snapshot run with no history and 
   assert.deepEqual(notices, [{
     code: NO_HISTORY,
     kind: 'advice',
-    message: 'count_drop_ratio was skipped: no comparable past runs were found. On CI with a fresh checkout this repeats every run; set paths.historyFile to a committed file.',
+    message: 'count_drop_ratio has no comparable past runs to compare with. On CI with a fresh checkout this happens on every run; set paths.historyFile (CLI: --history) to a file you commit.',
     since: '0.4.0',
     docs: 'https://github.com/shrinivas-sn/adapter-ingestion/blob/main/README.md#canary-history-on-ci',
     path: 'canary.count_drop_ratio',

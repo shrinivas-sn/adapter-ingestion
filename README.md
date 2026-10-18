@@ -58,9 +58,11 @@ analytics, recalculation, and notification are the consuming app's job.
 npm install @shrinivas-sn/adapter-ingestion
 ```
 
-**The published package ships only the generic engine** (`src/`, plus this README and
-`MIGRATION-0.2.md`) — no adapters, fixtures, or scripts. You bring your own adapter JSON
-and call `runIngest` against it from your own code.
+**The published package ships only the generic engine**: `src/`, `types/` (TypeScript
+types), `schema/` (the adapter JSON Schema), this README, `AGENTS.md`, `llms.txt`,
+`VERSIONING.md`, `UPGRADING.md`, `CHANGELOG.md`, `MIGRATION-0.2.md` and
+`NOTES-generalization.md`. No adapters, fixtures or scripts. You bring your own adapter JSON
+and run it with `runIngest` from your own code, or with the `adapter-ingestion` command.
 
 The core has no runtime dependencies. For `access.kind: "html"`, also install the optional
 peer once: `npm install cheerio`. JSON-only users never need it.
@@ -501,11 +503,12 @@ This repo carries worked-example adapters, each with recorded fixtures (`adapter
 `fixtures/`, `filters/`). They cover a public-domain government feed, a WordPress site's
 JSON endpoint and a public security-advisory API, plus a template `example.adapter.json`.
 They are **not** part of the npm package — `npm pack`'s file allowlist (`package.json`'s
-`"files"`) ships only `src/`, `README.md`, `NOTES-generalization.md`, and
-`MIGRATION-0.2.md`; verified by `scripts/verify-package.mjs` (packs the real tarball,
-installs it into a disposable consumer, and runs a consumer script that imports only the
-installed package). The CLI entry point (`node src/run.mjs <adapter.json> [--since
-YYYY-MM-DD]`) is this repo's own dev convenience, not a published `bin`/`npx` command —
+`"files"`) ships only the engine, its types and schema, and the docs listed under
+[Install](#install); verified by `scripts/verify-package.mjs` (packs the real tarball,
+installs it into a disposable consumer, runs a consumer script that imports only the
+installed package, type-checks a TypeScript consumer, and runs the installed bin). The
+published command is `adapter-ingestion` (see [Command line](#command-line)). The older
+entry point `node src/run.mjs <adapter.json> [--since YYYY-MM-DD]` still works —
 running `node src/run.mjs adapters/<HOST>.adapter.json` writes `runs/<HOST>/report-*.json`
 and exits non-zero on a stale canary or failure (exit codes: `0` ok, `1` stale/operational
 error/aborted, `2` usage/configuration).

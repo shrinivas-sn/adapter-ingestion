@@ -23,8 +23,15 @@ Each source is described by an **adapter**: a JSON file, not code.
 
 - Check every adapter with `npx adapter-ingestion validate <adapter.json> --json` before
   running it. `validateAdapter` is the authority; the schema only helps while writing.
-- Unknown keys are errors, not ignored. If a key is rejected, check the README and
-  `UPGRADING.md`: it may need a newer version.
+- Unknown keys **inside** a section (`access`, `fetch`, `map.*`, `canary`, `html`, ...) are
+  errors, not ignored. If one is rejected, check the README and `UPGRADING.md`: it may need
+  a newer version. Unknown **top-level** keys are allowed (for your own metadata, such as
+  `$schema` or notes), so a misspelled top-level key like `record_path` is silently
+  ignored: spell `records_path`, `required` and `canary` exactly.
+- Set `host` to the exact hostname in `access.url` (keep a leading `www.` if the URL has
+  it). It names the store file (`store/<host>.jsonl`), the runs directory and every record
+  id (`<host>:<source_id>`), so changing it later starts a new store.
+- `records_path` defaults to `"$"` (the parsed body itself is the array of records).
 - `access.url` must be on `host` (or a subdomain of it).
 - `map.source_id` and `map.url` are always required.
 - `outcome: "stale"` means the run completed but the canary tripped. It needs a look, not a
@@ -56,7 +63,8 @@ Each source is described by an **adapter**: a JSON file, not code.
    ```
 
 3. `npx adapter-ingestion validate adapter.json --json` → `{"ok":true,"errors":[]}`.
-4. `npx adapter-ingestion doctor adapter.json` → `ok`.
+4. `npx adapter-ingestion doctor adapter.json --json` → `"ok": true`. Before any run it
+   also lists `A_CANARY_NO_HISTORY`: expected, since there is no past run yet.
 5. `npx adapter-ingestion run adapter.json --json` → check `outcome` and `stages.parsed`.
 
 Pagination, retries, byte caps, headers and incremental fetching are under `fetch`; see the
