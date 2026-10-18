@@ -1,5 +1,6 @@
 import { IngestionError } from '../errors.mjs';
 import { jsonKind } from './json.mjs';
+import { htmlKind } from './html.mjs';
 
 // A kind turns a response's raw bytes into the body that records_path walks:
 //   { name, validate(adapter, need), parse({ bytes, contentType, url, adapter }) }
@@ -7,6 +8,7 @@ import { jsonKind } from './json.mjs';
 // byte caps, retries, redirect policy and pagination checks.
 export const BUILTIN_KINDS = Object.freeze(new Map([
   [jsonKind.name, jsonKind],
+  [htmlKind.name, htmlKind],
 ]));
 
 export function builtinKindNames() {

@@ -310,6 +310,10 @@ export function validateAdapterConfig(adapter, { kinds } = {}) {
   validateMap(adapter, need);
   validateRequired(adapter, need);
   validateCanary(adapter, need);
+  // The one top-level key tied to a kind: an html block anywhere else is a
+  // mistake that would otherwise be silently ignored.
+  need(adapter.html === undefined || adapter.access?.kind === 'html',
+    'html is only allowed when access.kind is "html"');
   // Kind-specific rules last, so the generic errors above read first. A
   // caller kind's validate() is foreign code: a throw is reported as a plain
   // validation error, never with its own (possibly sensitive) message.
