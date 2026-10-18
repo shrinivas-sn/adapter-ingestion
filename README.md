@@ -232,6 +232,21 @@ of the `E_*` constants named per function.
 
 ## Writing an adapter by hand
 
+For autocomplete and inline checks in your editor, point the adapter at the JSON Schema
+that ships with the package (since 0.4). Either the installed copy, which works offline:
+
+```json
+{ "$schema": "./node_modules/@shrinivas-sn/adapter-ingestion/schema/adapter.schema.json", "version": 1, "...": "..." }
+```
+
+or a version-pinned URL:
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.4.0/schema/adapter.schema.json`.
+The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
+helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
+authority, because some rules (selector compilation, cross-field checks) cannot be expressed
+in a schema. `$schema` does not change an adapter's fingerprint, so adding it keeps the
+canary's history.
+
 `map` entries are `{ path, normalize? }`. `path` is a dot-path into the raw source item
 (`"$"` for the item itself, `geometry.coordinates.0` for an array index). `normalize` is
 one of `text` (strips HTML, decodes numeric character references, collapses whitespace),
