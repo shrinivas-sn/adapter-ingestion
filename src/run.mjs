@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { validateAdapter } from './adapter.mjs';
 import { validateFetchConfig } from './config.mjs';
+import { validateKindsOption } from './kinds/index.mjs';
 import { canonicalize } from './contract.mjs';
 import { fetchAll } from './fetch.mjs';
 import { extractAll } from './extract.mjs';
@@ -101,7 +102,7 @@ async function finalizeReport(runsDir, reportFields, primaryError) {
   return { report, canary: reportFields.canary };
 }
 
-export async function runIngest({ adapter, paths, since, fetchImpl, signal, now = new Date(), store = { max_line_bytes: 64_000_000 } }) {
+export async function runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store = { max_line_bytes: 64_000_000 } }) {
   // Step 1: paths/now/signal are validated before anything else. An invalid
   // storeFile/runsDir means there's no reliable place to even attempt a
   // report, so this is the one case with no report at all -- not even an
@@ -118,6 +119,7 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, now 
   if (signal !== undefined && !(signal instanceof AbortSignal)) {
     throw new IngestionError('E_OPTIONS', 'signal must be an AbortSignal');
   }
+  validateKindsOption(kinds);
 
   // Step 2: allocate run identity, logical start, and a monotonic elapsed
   // clock -- finished_at is derived from logical start + elapsed, never a
@@ -134,8 +136,8 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, now 
   // reportable lifecycle -- runsDir is already known-usable, so an invalid
   // adapter still gets a persisted error report, with null host/fingerprint
   // since neither can be trusted from an invalid config.
-  const adapterCheck = validateAdapter(adapter);
-  const sinceCheck = since !== undefined ? validateFetchConfig(adapter, { since }) : { ok: true, errors: [] };
+  const adapterCheck = validateAdapter(adapter, { kinds });
+  const sinceCheck = since !== undefined ? validateFetchConfig(adapter, { since, kinds }) : { ok: true, errors: [] };
   const allErrors = [...new Set([...adapterCheck.errors, ...sinceCheck.errors])];
   if (allErrors.length > 0) {
     const err = new IngestionError('E_ADAPTER_INVALID', `invalid adapter: ${allErrors.join('; ')}`);
@@ -185,7 +187,7 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, now 
       });
 
       try {
-        const { items, diagnostics } = await fetchAll(adapter, { since, fetchImpl, signal });
+        const { items, diagnostics } = await fetchAll(adapter, { since, fetchImpl, signal, kinds });
         fetchDiagnostics = diagnostics;
         stages.fetched = items.length;
         for (const w of diagnostics.warnings ?? []) pushWarning(w);

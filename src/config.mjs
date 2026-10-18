@@ -310,8 +310,14 @@ export function validateAdapterConfig(adapter, { kinds } = {}) {
   validateMap(adapter, need);
   validateRequired(adapter, need);
   validateCanary(adapter, need);
-  // Kind-specific rules last, so the generic errors above read first.
-  kind?.validate(adapter, need);
+  // Kind-specific rules last, so the generic errors above read first. A
+  // caller kind's validate() is foreign code: a throw is reported as a plain
+  // validation error, never with its own (possibly sensitive) message.
+  try {
+    kind?.validate(adapter, need);
+  } catch {
+    need(false, `access.kind "${adapter.access.kind}": the kind's validate() threw`);
+  }
 
   return { ok: errors.length === 0, errors };
 }

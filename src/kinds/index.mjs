@@ -1,3 +1,4 @@
+import { IngestionError } from '../errors.mjs';
 import { jsonKind } from './json.mjs';
 
 // A kind turns a response's raw bytes into the body that records_path walks:
@@ -10,6 +11,32 @@ export const BUILTIN_KINDS = Object.freeze(new Map([
 
 export function builtinKindNames() {
   return [...BUILTIN_KINDS.keys()].sort();
+}
+
+function isPlainObject(v) {
+  if (v === null || typeof v !== 'object') return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+// The `kinds` option is caller code, not adapter content, so a mistake in it
+// is E_OPTIONS (like a bad `paths`), thrown before any report exists.
+export function validateKindsOption(kinds) {
+  if (kinds === undefined) return;
+  if (!isPlainObject(kinds)) {
+    throw new IngestionError('E_OPTIONS', 'kinds must be a plain object of name -> kind');
+  }
+  for (const [name, kind] of Object.entries(kinds)) {
+    if (BUILTIN_KINDS.has(name)) {
+      throw new IngestionError('E_OPTIONS', `kinds.${name} shadows a built-in kind`);
+    }
+    if (kind === null || typeof kind !== 'object' || typeof kind.parse !== 'function') {
+      throw new IngestionError('E_OPTIONS', `kinds.${name} must be an object with a parse function`);
+    }
+    if (kind.validate !== undefined && typeof kind.validate !== 'function') {
+      throw new IngestionError('E_OPTIONS', `kinds.${name}.validate must be a function when present`);
+    }
+  }
 }
 
 // Built-ins always win, so a caller can never swap out json-api behind an

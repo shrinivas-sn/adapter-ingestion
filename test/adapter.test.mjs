@@ -255,3 +255,11 @@ test('an unknown key says it may be a typo or a field from a newer version', () 
   const r = validateAdapter({ ...base, access: { ...base.access, colour: 'x' } });
   assert.ok(r.errors.includes('access.colour: unknown key (a typo, or a field from a newer version)'), r.errors.join(' | '));
 });
+
+test('a caller kind whose validate() throws is a validation error, without its message', () => {
+  const adapter = { ...base, access: { ...base.access, kind: 'csv' } };
+  const kinds = { csv: { parse() {}, validate() { throw new Error('secret token abc'); } } };
+  const r = validateAdapter(adapter, { kinds });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.errors, ['access.kind "csv": the kind\'s validate() threw']);
+});

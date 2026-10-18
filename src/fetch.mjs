@@ -3,7 +3,7 @@ import { getPath } from './extract.mjs';
 import { waitFor } from './http.mjs';
 import { IngestionError } from './errors.mjs';
 import { requestPage } from './fetch/request.mjs';
-import { resolveKind, BUILTIN_KINDS } from './kinds/index.mjs';
+import { resolveKind, validateKindsOption, BUILTIN_KINDS } from './kinds/index.mjs';
 
 export function buildUrl(adapter, { page, since } = {}) {
   const url = new URL(adapter.access.url);
@@ -24,7 +24,8 @@ function digestBatch(batch) {
   return createHash('sha256').update(JSON.stringify(batch)).digest('hex');
 }
 
-export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {}) {
+export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds } = {}) {
+  validateKindsOption(kinds);
   const p = adapter.fetch?.pagination;
   const hasPagination = p !== undefined;
   const maxPages = p?.max_pages ?? 1;
@@ -49,7 +50,7 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
   // fetchAll never validated the adapter itself (runIngest does), and it has
   // always parsed JSON whatever access.kind said; an unresolvable kind keeps
   // doing exactly that rather than crashing a direct caller.
-  const kind = resolveKind(adapter.access?.kind) ?? BUILTIN_KINDS.get('json-api');
+  const kind = resolveKind(adapter.access?.kind, kinds) ?? BUILTIN_KINDS.get('json-api');
 
   const items = [];
   const statuses = [];
@@ -87,8 +88,15 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
     try {
       body = await kind.parse({ bytes: buffer, contentType, url, adapter });
     } catch (err) {
-      if (err instanceof IngestionError) err.details = { ...(err.details ?? {}), ...fetchContext() };
-      throw err;
+      if (err instanceof IngestionError) {
+        err.details = { ...(err.details ?? {}), ...fetchContext() };
+        throw err;
+      }
+      // Caller kind code may throw anything, with text that could carry a
+      // secret or a page fragment; like E_FETCH, only our own message is
+      // reported, and the original stays in memory as .cause.
+      throw new IngestionError('E_PARSE', `kind "${kind.name}" failed to parse the response`,
+        { cause: err, details: fetchContext() });
     }
 
     if (Date.now() - startedAt > maxDurationMs) {
