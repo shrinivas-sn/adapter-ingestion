@@ -105,11 +105,11 @@ async function finalizeReport(runsDir, reportFields, primaryError) {
   return { report, canary: reportFields.canary };
 }
 
-export async function runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store = { max_line_bytes: 64_000_000 } }) {
-  // Step 1: paths/now/signal are validated before anything else. An invalid
-  // storeFile/runsDir means there's no reliable place to even attempt a
-  // report, so this is the one case with no report at all -- not even an
-  // in-memory one.
+// Step 1: paths/now/signal are validated before anything else. An invalid
+// storeFile/runsDir means there's no reliable place to even attempt a
+// report, so this is the one case with no report at all -- not even an
+// in-memory one.
+function validateRunOptions({ paths, now, signal, kinds }) {
   if (typeof paths?.storeFile !== 'string' || paths.storeFile.length === 0) {
     throw new IngestionError('E_OPTIONS', 'paths.storeFile must be a nonempty string');
   }
@@ -123,15 +123,151 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, kind
     throw new IngestionError('E_OPTIONS', 'signal must be an AbortSignal');
   }
   validateKindsOption(kinds);
+}
 
-  // Step 2: allocate run identity, logical start, and a monotonic elapsed
-  // clock -- finished_at is derived from logical start + elapsed, never a
-  // second independent wall-clock read, so it can't run backwards relative
-  // to started_at even if the system clock is adjusted mid-run.
+// Step 2: allocate run identity, logical start, and a monotonic elapsed
+// clock -- finished_at is derived from logical start + elapsed, never a
+// second independent wall-clock read, so it can't run backwards relative
+// to started_at even if the system clock is adjusted mid-run.
+function startRunClock(now) {
   const runId = randomUUID();
   const startedAtIso = now.toISOString();
   const monoStart = process.hrtime.bigint();
   const finishedAtIso = () => new Date(now.getTime() + Number(process.hrtime.bigint() - monoStart) / 1e6).toISOString();
+  return { runId, startedAtIso, finishedAtIso };
+}
+
+// Per-run mutable state shared by the in-lock stages. ctx.stage is tracked
+// explicitly rather than guessed from an error's shape after the fact --
+// the safe `failure.stage` field should say where in the pipeline things
+// actually stopped, not a heuristic approximation.
+function newRunContext(base) {
+  const ctx = {
+    ...base,
+    stage: 'fetch',
+    stages: emptyStages(),
+    warnings: [],
+    warningCount: 0,
+    errors: [],
+    errorCount: 0,
+    fetchDiagnostics: null,
+    storage: { status: 'not_started', written: 0 },
+    newestStalenessValue: null,
+  };
+  ctx.pushWarning = (w) => {
+    ctx.warningCount++;
+    if (ctx.warnings.length < MAX_WARNING_SAMPLES) ctx.warnings.push(w);
+  };
+  return ctx;
+}
+
+async function fetchStage(ctx) {
+  ctx.stage = 'fetch';
+  const { items, diagnostics } = await fetchAll(ctx.adapter,
+    { since: ctx.since, fetchImpl: ctx.fetchImpl, signal: ctx.signal, kinds: ctx.kinds });
+  ctx.fetchDiagnostics = diagnostics;
+  ctx.stages.fetched = items.length;
+  for (const w of diagnostics.warnings ?? []) ctx.pushWarning(w);
+  return items;
+}
+
+function extractStage(ctx, items) {
+  ctx.stage = 'extract';
+  const extracted = extractAll(items, ctx.adapter, { fetchedAt: ctx.startedAtIso });
+  ctx.errors = extracted.errors;
+  ctx.errorCount = extracted.errorCount;
+  ctx.stages.parsed = extracted.records.length;
+  ctx.newestStalenessValue = newestValueOf(extracted.records, ctx.adapter.canary?.staleness_field);
+  return extracted.records;
+}
+
+async function storeStage(ctx, records) {
+  ctx.stage = 'store';
+  const { stages } = ctx;
+  const index = await readIndex(ctx.canonicalStoreFile, { onWarning: ctx.pushWarning });
+  const { fresh, changed, unchanged } = splitByIndex(records, index);
+  stages.fresh = fresh.length;
+  stages.changed = changed.length;
+  stages.unchanged = unchanged.length;
+
+  if (ctx.signal?.aborted) {
+    throw new IngestionError('E_ABORTED', 'aborted before store append');
+  }
+
+  const toWrite = [...fresh, ...changed];
+  if (toWrite.length === 0) {
+    ctx.storage = { status: 'unchanged', written: 0 };
+    stages.written = 0;
+    return;
+  }
+  try {
+    const written = await appendRecords(ctx.canonicalStoreFile, toWrite, { maxLineBytes: ctx.store.max_line_bytes ?? 64_000_000 });
+    ctx.storage = { status: 'committed', written };
+    stages.written = written;
+  } catch (appendErr) {
+    // The batch may have partially landed -- a disk failure mid-write
+    // is not an atomic transaction (section 5.1). Storage state is
+    // genuinely unknown, not zero.
+    ctx.storage = { status: 'uncertain', written: null };
+    stages.written = null;
+    throw appendErr;
+  }
+}
+
+async function canaryStage(ctx) {
+  ctx.stage = 'canary';
+  const { adapter, mode, host, fingerprint, startedAtIso } = ctx;
+  const medianWindow = adapter.canary?.median_window ?? 5;
+  const eligibleHistory = mode === 'snapshot'
+    ? await readEligibleHistory(ctx.runsDir, medianWindow,
+      (candidate) => isEligibleForMedian(candidate, { host, fingerprint, startedAtIso }))
+    : [];
+
+  const canaryInput = { stages: ctx.stages, mode, newest_staleness_value: ctx.newestStalenessValue };
+  return checkCanary(canaryInput, eligibleHistory, adapter.canary ?? {}, { now: ctx.now });
+}
+
+// The report fields every in-lock exit shares; outcome, failure and canary
+// are what differ between a completed run and a fatal one.
+function inLockReportFields(ctx) {
+  return {
+    runId: ctx.runId, host: ctx.host, adapterFingerprint: ctx.fingerprint, mode: ctx.mode,
+    startedAt: ctx.startedAtIso, finishedAt: ctx.finishedAtIso(),
+    stages: ctx.stages, errors: ctx.errors, errorCount: ctx.errorCount,
+    warnings: ctx.warnings, warningCount: ctx.warningCount,
+    newestStalenessValue: ctx.newestStalenessValue, fetchDiagnostics: ctx.fetchDiagnostics,
+    storage: ctx.storage,
+  };
+}
+
+// Everything from fetch through the final report publish, inside the store
+// lock. A failure anywhere in here -- including the success report's own
+// write -- is finalized as a fatal report at the stage it reached.
+async function lockedRun(ctx) {
+  try {
+    const items = await fetchStage(ctx);
+    const records = extractStage(ctx, items);
+    await storeStage(ctx, records);
+    const canary = await canaryStage(ctx);
+    return await finalizeReport(ctx.runsDir, {
+      ...inLockReportFields(ctx),
+      outcome: canary.status === 'stale' ? 'stale' : 'ok',
+      canary,
+    }, null);
+  } catch (err) {
+    return finalizeReport(ctx.runsDir, {
+      ...inLockReportFields(ctx),
+      outcome: err.code === 'E_ABORTED' ? 'aborted' : 'error',
+      failure: safeFailure(err, ctx.stage),
+      canary: notEvaluatedCanary(),
+    }, err);
+  }
+}
+
+export async function runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store = { max_line_bytes: 64_000_000 } }) {
+  validateRunOptions({ paths, now, signal, kinds });
+
+  const { runId, startedAtIso, finishedAtIso } = startRunClock(now);
   const mode = since !== undefined ? 'incremental' : 'snapshot';
   const runsDir = paths.runsDir;
 
@@ -161,100 +297,13 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, kind
   let capturedResult = null;
   try {
     return await withStoreLock(paths.storeFile, { runId }, async (canonicalStoreFile) => {
-      const stages = emptyStages();
-      const warnings = [];
-      let warningCount = 0;
-      const pushWarning = (w) => {
-        warningCount++;
-        if (warnings.length < MAX_WARNING_SAMPLES) warnings.push(w);
-      };
-
-      let fetchDiagnostics = null;
-      let storage = { status: 'not_started', written: 0 };
-      let newestStalenessValue = null;
-      let errors = [];
-      let errorCount = 0;
-      // Tracked explicitly rather than guessed from an error's shape after
-      // the fact -- the safe `failure.stage` field should say where in the
-      // pipeline things actually stopped, not a heuristic approximation.
-      let stage = 'fetch';
-
-      const buildFatalFields = (err) => ({
-        runId, host, adapterFingerprint: fingerprint, mode,
-        outcome: err.code === 'E_ABORTED' ? 'aborted' : 'error',
-        failure: safeFailure(err, stage),
-        startedAt: startedAtIso, finishedAt: finishedAtIso(),
-        stages, errors, errorCount, warnings, warningCount,
-        newestStalenessValue, fetchDiagnostics, storage,
-        canary: notEvaluatedCanary(),
+      const ctx = newRunContext({
+        adapter, since, fetchImpl, signal, kinds, now, store, runsDir,
+        runId, host, fingerprint, mode, startedAtIso, finishedAtIso, canonicalStoreFile,
       });
-
-      try {
-        const { items, diagnostics } = await fetchAll(adapter, { since, fetchImpl, signal, kinds });
-        fetchDiagnostics = diagnostics;
-        stages.fetched = items.length;
-        for (const w of diagnostics.warnings ?? []) pushWarning(w);
-
-        stage = 'extract';
-        const extracted = extractAll(items, adapter, { fetchedAt: startedAtIso });
-        errors = extracted.errors;
-        errorCount = extracted.errorCount;
-        stages.parsed = extracted.records.length;
-        newestStalenessValue = newestValueOf(extracted.records, adapter.canary?.staleness_field);
-
-        stage = 'store';
-        const index = await readIndex(canonicalStoreFile, { onWarning: pushWarning });
-        const { fresh, changed, unchanged } = splitByIndex(extracted.records, index);
-        stages.fresh = fresh.length;
-        stages.changed = changed.length;
-        stages.unchanged = unchanged.length;
-
-        if (signal?.aborted) {
-          throw new IngestionError('E_ABORTED', 'aborted before store append');
-        }
-
-        const toWrite = [...fresh, ...changed];
-        if (toWrite.length === 0) {
-          storage = { status: 'unchanged', written: 0 };
-          stages.written = 0;
-        } else {
-          try {
-            const written = await appendRecords(canonicalStoreFile, toWrite, { maxLineBytes: store.max_line_bytes ?? 64_000_000 });
-            storage = { status: 'committed', written };
-            stages.written = written;
-          } catch (appendErr) {
-            // The batch may have partially landed -- a disk failure mid-write
-            // is not an atomic transaction (section 5.1). Storage state is
-            // genuinely unknown, not zero.
-            storage = { status: 'uncertain', written: null };
-            stages.written = null;
-            throw appendErr;
-          }
-        }
-
-        stage = 'canary';
-
-        const medianWindow = adapter.canary?.median_window ?? 5;
-        const eligibleHistory = mode === 'snapshot'
-          ? await readEligibleHistory(runsDir, medianWindow,
-            (candidate) => isEligibleForMedian(candidate, { host, fingerprint, startedAtIso }))
-          : [];
-
-        const canaryInput = { stages, mode, newest_staleness_value: newestStalenessValue };
-        const canary = checkCanary(canaryInput, eligibleHistory, adapter.canary ?? {}, { now });
-
-        const finalized = await finalizeReport(runsDir, {
-          runId, host, adapterFingerprint: fingerprint, mode,
-          outcome: canary.status === 'stale' ? 'stale' : 'ok',
-          startedAt: startedAtIso, finishedAt: finishedAtIso(),
-          stages, errors, errorCount, warnings, warningCount,
-          newestStalenessValue, fetchDiagnostics, storage, canary,
-        }, null);
-        capturedResult = finalized;
-        return finalized;
-      } catch (err) {
-        return finalizeReport(runsDir, buildFatalFields(err), err);
-      }
+      const finalized = await lockedRun(ctx);
+      capturedResult = finalized;
+      return finalized;
     });
   } catch (err) {
     if (err.report) throw err; // already fully finalized inside the lock above
