@@ -1,0 +1,479 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/shrinivas-sn/adapter-ingestion/blob/main/schema/adapter.schema.json",
+  "title": "adapter-ingestion adapter",
+  "description": "One source's adapter: where to fetch, how a response becomes records, and the canary thresholds. For editors and agents; validateAdapter() (and `adapter-ingestion validate`) stays the authority, since some rules (selector compilation, cross-field checks) cannot be expressed here.",
+  "type": "object",
+  "required": [
+    "version",
+    "host",
+    "access",
+    "map"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL of this schema, for editor support. Ignored by the engine."
+    },
+    "version": {
+      "const": 1,
+      "description": "Adapter format version. Always 1 in this engine."
+    },
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
+      "description": "Bare hostname of the source. access.url must be on this host or a subdomain; it also names store/<host>.jsonl and runs/<host>/."
+    },
+    "access": {
+      "$ref": "#/$defs/access"
+    },
+    "fetch": {
+      "$ref": "#/$defs/fetch"
+    },
+    "records_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Dot-path to the array of records in the parsed body; \"$\" is the body itself."
+    },
+    "map": {
+      "type": "object",
+      "minProperties": 1,
+      "required": [
+        "source_id",
+        "url"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/map_rule"
+      },
+      "description": "Output field name -> rule. source_id and url are always required.",
+      "properties": {
+        "source_id": {
+          "$ref": "#/$defs/map_rule",
+          "description": "Where the record id comes from. Mandatory."
+        },
+        "url": {
+          "$ref": "#/$defs/map_rule",
+          "description": "Where the record URL comes from. Mandatory."
+        }
+      }
+    },
+    "required": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true,
+      "description": "Mapped fields a record must have (non-null) to be kept."
+    },
+    "canary": {
+      "$ref": "#/$defs/canary"
+    },
+    "html": {
+      "$ref": "#/$defs/html"
+    }
+  },
+  "if": {
+    "type": "object",
+    "required": [
+      "access"
+    ],
+    "properties": {
+      "access": {
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "properties": {
+          "kind": {
+            "const": "html"
+          }
+        }
+      }
+    }
+  },
+  "then": {
+    "type": "object",
+    "required": [
+      "html"
+    ],
+    "properties": {
+      "html": true
+    }
+  },
+  "else": {
+    "not": {
+      "type": "object",
+      "required": [
+        "html"
+      ],
+      "properties": {
+        "html": true
+      }
+    }
+  },
+  "$defs": {
+    "access": {
+      "type": "object",
+      "required": [
+        "tier",
+        "kind",
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tier": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "How the source is reached, 0 (public API) to 5 (last resort)."
+        },
+        "kind": {
+          "type": "string",
+          "anyOf": [
+            {
+              "enum": [
+                "json-api",
+                "html"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "How the body becomes records: \"json-api\", \"html\" (needs the optional cheerio peer), or the name of a kind you register with the kinds option."
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "description": "The http(s) URL to fetch. No credentials in the URL."
+        }
+      }
+    },
+    "fetch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "const": "GET",
+          "description": "Omit, or exactly GET."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Request headers, name -> string value."
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Per-request timeout."
+        },
+        "max_duration_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647,
+          "description": "Budget for the whole fetch, including retries."
+        },
+        "max_records": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Fail if the fetch produces more records than this."
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Cap for one response body."
+        },
+        "max_total_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Cap for all response bodies together."
+        },
+        "delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483647,
+          "description": "Wait between page requests."
+        },
+        "pagination": {
+          "$ref": "#/$defs/pagination"
+        },
+        "incremental": {
+          "$ref": "#/$defs/incremental"
+        },
+        "retry": {
+          "$ref": "#/$defs/retry"
+        }
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "required": [
+        "style",
+        "param"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "style": {
+          "const": "page-param",
+          "description": "Page-number pagination."
+        },
+        "param": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Query parameter that carries the page number."
+        },
+        "max_pages": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Stop after this many pages."
+        },
+        "per_page": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Expected page size; a shorter page ends pagination."
+        },
+        "per_page_param": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Query parameter that carries per_page. Requires per_page."
+        },
+        "allow_truncation": {
+          "type": "boolean",
+          "description": "Accept stopping at max_pages on a full page instead of failing with E_PAGE_LIMIT."
+        }
+      }
+    },
+    "incremental": {
+      "type": "object",
+      "required": [
+        "param",
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "param": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Query parameter that carries the since date."
+        },
+        "type": {
+          "const": "iso-date",
+          "description": "The since value is a YYYY-MM-DD date."
+        }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Total attempts per request, including the first."
+        },
+        "backoff_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Base delay before a retry."
+        },
+        "max_delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Largest single retry delay; must be >= backoff_ms."
+        }
+      }
+    },
+    "map_rule": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Dot-path into one raw record; \"$\" is the record itself; a numeric segment indexes an array."
+        },
+        "normalize": {
+          "enum": [
+            "text",
+            "number",
+            "iso-date",
+            "bool"
+          ],
+          "description": "Optional value cleaning."
+        }
+      }
+    },
+    "canary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_records": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "A snapshot run with fewer parsed records is stale."
+        },
+        "median_window": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "How many past runs form the trailing median."
+        },
+        "count_drop_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Stale when parsed < median x this ratio."
+        },
+        "required_field_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Stale when parsed/fetched falls below this."
+        },
+        "max_staleness_days": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Stale when the newest staleness_field value is older. Set with staleness_field."
+        },
+        "staleness_field": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A map field holding a date. Set with max_staleness_days."
+        }
+      },
+      "dependentRequired": {
+        "max_staleness_days": [
+          "staleness_field"
+        ],
+        "staleness_field": [
+          "max_staleness_days"
+        ]
+      }
+    },
+    "html": {
+      "type": "object",
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "select",
+            "script_json"
+          ],
+          "description": "select: one record per element matching rows. script_json: the JSON inside a <script> becomes the body."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "const": "select"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/html_select"
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "properties": {
+              "mode": {
+                "const": "script_json"
+              }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/html_script_json"
+          }
+        }
+      ]
+    },
+    "html_select": {
+      "type": "object",
+      "required": [
+        "mode",
+        "rows",
+        "fields"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "select"
+        },
+        "rows": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "CSS selector; each match is one record."
+        },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 100,
+          "additionalProperties": {
+            "$ref": "#/$defs/html_field"
+          },
+          "description": "Raw field name -> how to read it from the row."
+        }
+      }
+    },
+    "html_script_json": {
+      "type": "object",
+      "required": [
+        "mode",
+        "script"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "script_json"
+        },
+        "script": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "CSS selector for the <script> element whose JSON becomes the body."
+        }
+      }
+    },
+    "html_field": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "selector": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "CSS selector inside the row; omit for the row itself."
+        },
+        "attr": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "description": "Read this attribute instead of the text."
+        },
+        "resolve_url": {
+          "type": "boolean",
+          "description": "Resolve the value to an absolute http(s) URL against the page URL; anything else becomes null."
+        }
+      }
+    }
+  }
+}

@@ -49,7 +49,8 @@ function fail(message, detail) {
 // else in the packed tarball is a real leak (adapters/, fixtures/, scripts/,
 // test/, plan.md, local store/run data, ...) and must fail loudly.
 const EXPECTED_TOP_LEVEL = new Set(['package.json', 'LICENSE', 'README.md', 'NOTES-generalization.md', 'MIGRATION-0.2.md', 'VERSIONING.md', 'UPGRADING.md']);
-const isExpectedPackedPath = (path) => path.split('/')[0] === 'src' || EXPECTED_TOP_LEVEL.has(path);
+const EXPECTED_DIRS = new Set(['src', 'schema']);
+const isExpectedPackedPath = (path) => EXPECTED_DIRS.has(path.split('/')[0]) || EXPECTED_TOP_LEVEL.has(path);
 
 // Shared by both consumer scripts: one html page, one row, one relative link.
 const HTML_FIXTURE = String.raw`

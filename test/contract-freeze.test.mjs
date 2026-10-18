@@ -16,6 +16,7 @@ const ROOT = new URL('../', import.meta.url);
 const EXPORTS = {
   '.': ['runIngest'],
   './adapter': ['validateAdapter', 'verifyAgainstFixtures'],
+  './adapter.schema.json': 'json',
   './canary': ['checkCanary'],
   './contract': ['assertNoUndefined', 'buildRecord', 'canonicalize', 'contentHash', 'isValidSourceId', 'isValidSourceUrl'],
   './dedupe': ['splitByIndex'],
@@ -52,6 +53,12 @@ test('exports surface: every package subpath exposes exactly the frozen names', 
   const pkg = JSON.parse(await readFile(new URL('package.json', ROOT), 'utf8'));
   assert.deepEqual(Object.keys(pkg.exports).sort(), Object.keys(EXPORTS).sort());
   for (const [subpath, target] of Object.entries(pkg.exports)) {
+    // A JSON subpath is data, not a module: check it parses as the schema.
+    if (EXPORTS[subpath] === 'json') {
+      const json = JSON.parse(await readFile(new URL(target, ROOT), 'utf8'));
+      assert.equal(json.$schema, 'https://json-schema.org/draft/2020-12/schema', `exports of "${subpath}"`);
+      continue;
+    }
     const mod = await import(new URL(target, ROOT));
     assert.deepEqual(Object.keys(mod).sort(), EXPORTS[subpath], `exports of "${subpath}"`);
   }
