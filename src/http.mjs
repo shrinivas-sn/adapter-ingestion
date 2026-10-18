@@ -9,12 +9,15 @@ import { IngestionError } from './errors.mjs';
 // `budget`, when supplied, is one mutable { bytes, maxBytes } object the
 // caller reuses across every attempt/page of a single fetchAll invocation,
 // so max_total_bytes is enforced across the whole run, not per response.
-export async function readJsonBody(response, { signal, maxResponseBytes, budget } = {}) {
+//
+// Returns the raw bytes: decoding belongs to the source kind, because only
+// it knows the format (JSON is UTF-8 by spec; HTML must sniff its charset).
+export async function readBodyBytes(response, { signal, maxResponseBytes, budget } = {}) {
   if (!response.body) {
     // A response with no body stream (some minimal doubles, a 204) has
     // nothing to bound-read; treat it as an empty body rather than crashing
     // on a null getReader() call.
-    return { json: JSON.parse('null'), bytes: 0 };
+    return { buffer: Buffer.alloc(0), bytes: 0 };
   }
 
   const reader = response.body.getReader();
@@ -48,14 +51,23 @@ export async function readJsonBody(response, { signal, maxResponseBytes, budget 
     try { await reader.cancel(); } catch { /* already closed or errored */ }
   }
 
-  const text = Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8');
-  let json;
+  return { buffer: Buffer.concat(chunks.map((c) => Buffer.from(c))), bytes };
+}
+
+// An empty body is null, as it always was: a 204 or a blank page is not a
+// parse error, and records_path then yields no batch.
+export function decodeJson(buffer) {
+  if (buffer.length === 0) return null;
   try {
-    json = text.length === 0 ? null : JSON.parse(text);
+    return JSON.parse(buffer.toString('utf8'));
   } catch {
     throw new IngestionError('E_RESPONSE_JSON', 'response body is not valid JSON');
   }
-  return { json, bytes };
+}
+
+export async function readJsonBody(response, options = {}) {
+  const { buffer, bytes } = await readBodyBytes(response, options);
+  return { json: decodeJson(buffer), bytes };
 }
 
 // Retry-After is either an integer count of seconds or an HTTP-date (RFC
