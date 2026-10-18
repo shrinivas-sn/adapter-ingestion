@@ -28,6 +28,7 @@ jobs:
 
       - run: npm ci
       - run: npm run typecheck
+      - run: node scripts/gen-agents-codes.mjs --check
       - run: npm test
       - run: node scripts/verify-package.mjs
 

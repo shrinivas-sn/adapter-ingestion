@@ -32,7 +32,8 @@
     "NOTES-generalization.md",
     "MIGRATION-0.2.md",
     "VERSIONING.md",
-    "UPGRADING.md"
+    "UPGRADING.md",
+    "AGENTS.md"
   ],
   "exports": {
     ".": {
