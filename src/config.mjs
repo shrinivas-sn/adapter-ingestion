@@ -1,10 +1,7 @@
 import { isValidDateOnly } from './normalize.mjs';
+import { builtinKindNames } from './kinds/index.mjs';
 
 const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'bool']);
-// json-api only: feed/html/browser are excluded from this release (see plan.md
-// section 1.3) and must fail validation, not silently pass through to a fetch
-// layer that can only parse JSON.
-const KINDS = new Set(['json-api']);
 const MANDATORY_MAP_KEYS = ['source_id', 'url'];
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 const RESERVED_HOST_BASENAME = /^(CON|NUL|AUX|PRN|COM[1-9]|LPT[1-9])$/i;
@@ -72,7 +69,10 @@ function validateAccessSection(adapter, need, { requireTier }) {
   if (requireTier) {
     need(inIntRange(access.tier, 0, 5), 'access.tier must be an integer 0-5');
   }
-  need(KINDS.has(access.kind), `access.kind must be one of ${[...KINDS].join(', ')}`);
+  // Only kinds this engine can actually parse pass; anything else must fail
+  // here rather than reach a fetch layer that cannot decode it.
+  const kinds = builtinKindNames();
+  need(kinds.includes(access.kind), `access.kind must be one of ${kinds.join(', ')}`);
   need(typeof access.url === 'string', 'access.url is required');
   if (typeof access.url === 'string') {
     let u;

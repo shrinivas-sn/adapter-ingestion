@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import { getPath } from './extract.mjs';
-import { decodeJson, waitFor } from './http.mjs';
+import { waitFor } from './http.mjs';
 import { IngestionError } from './errors.mjs';
 import { requestPage } from './fetch/request.mjs';
+import { resolveKind, BUILTIN_KINDS } from './kinds/index.mjs';
 
 export function buildUrl(adapter, { page, since } = {}) {
   const url = new URL(adapter.access.url);
@@ -45,6 +46,10 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
   const origin = new URL(adapter.access.url).origin;
   const startedAt = Date.now();
   const budget = { bytes: 0, maxBytes: maxTotalBytes };
+  // fetchAll never validated the adapter itself (runIngest does), and it has
+  // always parsed JSON whatever access.kind said; an unresolvable kind keeps
+  // doing exactly that rather than crashing a direct caller.
+  const kind = resolveKind(adapter.access?.kind) ?? BUILTIN_KINDS.get('json-api');
 
   const items = [];
   const statuses = [];
@@ -80,7 +85,7 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal } = {
     // was never retryable, so lifting it out of the loop changes nothing.
     let body;
     try {
-      body = decodeJson(buffer);
+      body = await kind.parse({ bytes: buffer, contentType, url, adapter });
     } catch (err) {
       if (err instanceof IngestionError) err.details = { ...(err.details ?? {}), ...fetchContext() };
       throw err;
