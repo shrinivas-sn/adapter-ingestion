@@ -33,7 +33,8 @@
     "MIGRATION-0.2.md",
     "VERSIONING.md",
     "UPGRADING.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "llms.txt"
   ],
   "exports": {
     ".": {

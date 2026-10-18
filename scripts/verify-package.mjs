@@ -48,7 +48,7 @@ function fail(message, detail) {
 // LICENSE, README) plus this package's own declared allowlist. Anything
 // else in the packed tarball is a real leak (adapters/, fixtures/, scripts/,
 // test/, plan.md, local store/run data, ...) and must fail loudly.
-const EXPECTED_TOP_LEVEL = new Set(['package.json', 'LICENSE', 'README.md', 'NOTES-generalization.md', 'MIGRATION-0.2.md', 'VERSIONING.md', 'UPGRADING.md', 'AGENTS.md']);
+const EXPECTED_TOP_LEVEL = new Set(['package.json', 'LICENSE', 'README.md', 'NOTES-generalization.md', 'MIGRATION-0.2.md', 'VERSIONING.md', 'UPGRADING.md', 'AGENTS.md', 'llms.txt']);
 const EXPECTED_DIRS = new Set(['src', 'schema', 'types']);
 const isExpectedPackedPath = (path) => EXPECTED_DIRS.has(path.split('/')[0]) || EXPECTED_TOP_LEVEL.has(path);
 
