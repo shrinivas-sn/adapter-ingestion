@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { runBin, disposableCwd, assertNoLeakage, VALID_ADAPTER } from './helpers/bin.mjs';
+import { startServer } from './helpers/http-server.mjs';
 
 test('bin: no command is a usage error (exit 2)', async () => {
   const { code, stderr } = await runBin([]);
@@ -90,4 +91,96 @@ test('bin explain: an unknown code exits 2', async () => {
   assert.equal(code, 2);
   assert.equal(JSON.parse(stdout).error.code, 'E_OPTIONS');
   assert.equal((await runBin(['explain', 'constructor'])).code, 2);
+});
+
+// --- run ---
+
+async function loopbackAdapter(t, cwd, { status = 200, body = [{ id: 1, link: 'https://example.test/1', title: 'One' }] } = {}) {
+  const { origin, close } = await startServer({
+    '/data': (req, res) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    },
+  });
+  t.after(close);
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { retry: { max_attempts: 1 } },
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  await writeFile(join(cwd, 'adapter.json'), JSON.stringify(adapter));
+  return adapter;
+}
+
+test('bin run: an ok run exits 0; --json has exactly the frozen keys', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  const { code, stdout } = await runBin(['run', 'adapter.json', '--json'], { cwd });
+  assert.equal(code, 0);
+  const out = JSON.parse(stdout);
+  assert.deepEqual(Object.keys(out), ['outcome', 'stages', 'canary', 'notices', 'failure']);
+  assert.equal(out.outcome, 'ok');
+  assert.equal(out.failure, null);
+  assert.equal(out.stages.written, 1);
+  assert.ok((await readFile(join(cwd, 'store', '127.0.0.1.jsonl'), 'utf8')).includes('"id":"127.0.0.1:1"'));
+});
+
+test('bin run: notices go to stderr in text mode; the summary to stdout', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  const { code, stdout, stderr } = await runBin(['run', 'adapter.json'], { cwd });
+  assert.equal(code, 0);
+  assert.match(stdout, /^outcome: ok \(fetched 1, parsed 1, fresh 1, changed 0, unchanged 0, written 1\)/);
+  assert.match(stderr, /notice A_CANARY_NO_HISTORY: /);
+});
+
+test('bin run: --history and --store/--runs are honoured', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  const { code, stdout } = await runBin(
+    ['run', 'adapter.json', '--store', 'data/s.jsonl', '--runs', 'reports', '--history', 'data/h.jsonl', '--json'], { cwd });
+  assert.equal(code, 0);
+  assert.deepEqual(JSON.parse(stdout).notices, []);
+  assert.equal((await readFile(join(cwd, 'data', 'h.jsonl'), 'utf8')).trim().split('\n').length, 1);
+  assert.ok((await readdir(join(cwd, 'reports'))).some((n) => n.startsWith('report-')));
+  assert.ok((await readFile(join(cwd, 'data', 's.jsonl'), 'utf8')).length > 0);
+});
+
+test('bin run: an HTTP failure exits 1 with failure.code', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd, { status: 500, body: {} });
+  const { code, stdout } = await runBin(['run', 'adapter.json', '--json'], { cwd });
+  assert.equal(code, 1);
+  const out = JSON.parse(stdout);
+  assert.equal(out.outcome, 'error');
+  assert.equal(out.failure.code, 'E_HTTP_STATUS');
+});
+
+test('bin run: an invalid adapter exits 2', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'adapter.json'), JSON.stringify({ ...VALID_ADAPTER, version: 2 }));
+  const { code, stdout } = await runBin(['run', 'adapter.json', '--json'], { cwd });
+  assert.equal(code, 2);
+  assert.equal(JSON.parse(stdout).failure.code, 'E_ADAPTER_INVALID');
+});
+
+test('bin run: --history equal to --store is a config error (exit 2) with no stack trace', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  const { code, stdout, stderr } = await runBin(['run', 'adapter.json', '--store', 'x.jsonl', '--history', 'x.jsonl'], { cwd });
+  assert.equal(code, 2);
+  assert.equal(stdout, '');
+  assert.match(stderr, /paths.historyFile must differ from paths.storeFile/);
+  assertNoLeakage(stderr);
+});
+
+test('bin run: an adapter with no host is refused before any path is derived', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'adapter.json'), JSON.stringify({ ...VALID_ADAPTER, host: undefined }));
+  const { code, stderr } = await runBin(['run', 'adapter.json'], { cwd });
+  assert.equal(code, 2);
+  assert.match(stderr, /no usable "host"/);
+  assert.deepEqual((await readdir(cwd)).sort(), ['adapter.json']);
 });
