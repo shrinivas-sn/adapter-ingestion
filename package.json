@@ -28,7 +28,8 @@
     "src",
     "README.md",
     "NOTES-generalization.md",
-    "MIGRATION-0.2.md"
+    "MIGRATION-0.2.md",
+    "VERSIONING.md"
   ],
   "exports": {
     ".": "./src/run.mjs",
