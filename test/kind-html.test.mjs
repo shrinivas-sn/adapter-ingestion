@@ -158,3 +158,40 @@ test('a missing cheerio is E_KIND_DEPENDENCY with the install command', async ()
     message: 'access.kind "html" needs the optional dependency cheerio: npm install cheerio',
   });
 });
+
+const NEXT_PAGE = `<html><body><div id="__next"></div>
+<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{"items":[{"id":"a","link":"https://example.test/a","title":"A"}]}}}</script>
+</body></html>`;
+
+test('script_json: __NEXT_DATA__ becomes the body that records_path walks', async () => {
+  const spec = { mode: 'script_json', script: 'script#__NEXT_DATA__' };
+  const body = await parse(NEXT_PAGE, { spec });
+  assert.deepEqual(body.props.pageProps.items[0].title, 'A');
+});
+
+test('script_json: the right JSON-LD block is picked by content when several exist', async () => {
+  const page = `<script type="application/ld+json">{"@type":"WebSite","name":"x"}</script>
+<script type="application/ld+json">{"@type":"ItemList","itemListElement":[{"url":"https://example.test/1","name":"One"}]}</script>`;
+  const spec = { mode: 'script_json', script: 'script[type="application/ld+json"]:contains("ItemList")' };
+  const body = await parse(page, { spec });
+  assert.equal(body.itemListElement[0].name, 'One');
+});
+
+test('script_json: no matching element is E_PARSE_NO_MATCH; broken JSON is E_RESPONSE_JSON', async () => {
+  const spec = { mode: 'script_json', script: 'script#__NEXT_DATA__' };
+  await assert.rejects(parse('<p>no script</p>', { spec }),
+    { code: 'E_PARSE_NO_MATCH', message: 'html.script matched no element' });
+  await assert.rejects(parse('<script id="__NEXT_DATA__">{"props":</script>', { spec }), { code: 'E_RESPONSE_JSON' });
+  await assert.rejects(parse('<p></p>', { spec: { mode: 'script_json', script: 'script:focus' } }),
+    { code: 'E_ADAPTER_INVALID', message: 'html.script: invalid selector' });
+});
+
+test('script_json validation: any records_path is allowed; script is required and bounded', () => {
+  const ok = validateAdapter(adapterWith({ mode: 'script_json', script: 'script#__NEXT_DATA__' },
+    { records_path: 'props.pageProps.items' }));
+  assert.equal(ok.ok, true, ok.errors.join(' | '));
+  const errorsFor = (html) => validateAdapter(adapterWith(html)).errors;
+  assert.ok(errorsFor({ mode: 'script_json' }).includes('html.script must be a nonempty string of at most 500 characters'));
+  assert.ok(errorsFor({ mode: 'script_json', script: 's', rows: 'tr' })
+    .includes('html.rows: unknown key (a typo, or a field from a newer version)'));
+});

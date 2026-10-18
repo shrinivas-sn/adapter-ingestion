@@ -1,14 +1,18 @@
 import { IngestionError } from '../errors.mjs';
+import { decodeJson } from '../http.mjs';
 
-// access.kind "html": server-rendered pages turned into one plain object per
-// matching row, driven entirely by CSS selectors in the adapter. Nothing here
-// knows about any particular site.
+// access.kind "html", driven entirely by CSS selectors in the adapter; nothing
+// here knows about any particular site. Two modes:
+//   select       one plain object per element matching `rows`
+//   script_json  the JSON inside the first element matching `script`
+//                (JSON-LD, __NEXT_DATA__, ...) becomes the body
 //
 // cheerio is an optional peer dependency, loaded on first use only, so a
 // json-api-only consumer never needs it installed.
 
-const MODES = ['select'];
+const MODES = ['select', 'script_json'];
 const SELECT_KEYS = new Set(['mode', 'rows', 'fields']);
+const SCRIPT_JSON_KEYS = new Set(['mode', 'script']);
 const FIELD_KEYS = new Set(['selector', 'attr', 'resolve_url']);
 const MAX_SELECTOR = 500;
 const MAX_ATTR = 100;
@@ -38,6 +42,12 @@ function validate(adapter, need) {
   need(isPlainObject(html), 'html is required when access.kind is "html"');
   if (!isPlainObject(html)) return;
   need(MODES.includes(html.mode), `html.mode must be one of ${MODES.join(', ')}`);
+  if (html.mode === 'script_json') {
+    // The script holds a whole document, so records_path walks it as usual.
+    checkUnknownKeys(html, SCRIPT_JSON_KEYS, 'html', need);
+    need(isBoundedString(html.script, MAX_SELECTOR), `html.script must be a nonempty string of at most ${MAX_SELECTOR} characters`);
+    return;
+  }
   if (html.mode !== 'select') return;
 
   checkUnknownKeys(html, SELECT_KEYS, 'html', need);
@@ -139,6 +149,15 @@ async function parse({ bytes, contentType, url, adapter }) {
   const $ = cheerio.loadBuffer(buffer, {
     encoding: { ...(charset ? { transportLayerEncodingLabel: charset } : {}), defaultEncoding: 'utf-8' },
   });
+
+  if (adapter.html.mode === 'script_json') {
+    const el = select(() => $(adapter.html.script).first(), 'html.script');
+    if (el.length === 0) {
+      throw new IngestionError('E_PARSE_NO_MATCH', 'html.script matched no element');
+    }
+    // Same decoder and E_RESPONSE_JSON as a json-api body.
+    return decodeJson(Buffer.from(el.text(), 'utf8'));
+  }
 
   const { rows, fields } = adapter.html;
   const fieldEntries = Object.entries(fields);
