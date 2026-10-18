@@ -105,3 +105,13 @@ test('repo adapters stay valid', async () => {
     assert.equal(result.ok, true, `${f}: ${JSON.stringify(result.errors)}`);
   }
 });
+
+test('code catalog covers exactly the frozen codes', async () => {
+  const { CODES } = await import(new URL('src/codes.mjs', ROOT));
+  assert.deepEqual(Object.keys(CODES).sort(), [...ERROR_CODES, ...NOTICE_CODES].sort());
+  for (const [code, entry] of Object.entries(CODES)) {
+    for (const field of ['kind', 'meaning', 'cause', 'fix']) {
+      assert.ok(typeof entry[field] === 'string' && entry[field].length > 0, `${code}.${field}`);
+    }
+  }
+});
