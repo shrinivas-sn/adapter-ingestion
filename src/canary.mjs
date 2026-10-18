@@ -48,6 +48,13 @@ function eligibleForMedian(history) {
   return history.filter((h) => h.outcome === undefined || h.outcome === 'ok');
 }
 
+/**
+ * @param {{ stages?: { fetched?: number, parsed?: number }, mode?: string, newest_staleness_value?: any }} report
+ * @param {Array<{ outcome?: string, stages?: { parsed?: number } }>} history
+ * @param {Record<string, any>} cfg
+ * @param {{ now?: Date }} [options]
+ * @returns {import('./types.mjs').CanaryResult}
+ */
 export function checkCanary(report, history, cfg, { now = new Date() } = {}) {
   const breaches = [];
   const skipped = [];

@@ -1,0 +1,16 @@
+{
+  "include": ["src"],
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "module": "nodenext",
+    "target": "es2022",
+    "outDir": "types",
+    "rootDir": "src",
+    "strict": false,
+    "skipLibCheck": true,
+    "types": ["node"]
+  }
+}

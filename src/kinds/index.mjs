@@ -6,10 +6,10 @@ import { htmlKind } from './html.mjs';
 //   { name, validate(adapter, need), parse({ bytes, contentType, url, adapter }) }
 // It runs after the bounded read, so every kind inherits the same timeouts,
 // byte caps, retries, redirect policy and pagination checks.
-export const BUILTIN_KINDS = Object.freeze(new Map([
+export const BUILTIN_KINDS = Object.freeze(new Map(/** @type {Array<[string, import('../types.mjs').Kind]>} */ ([
   [jsonKind.name, jsonKind],
   [htmlKind.name, htmlKind],
-]));
+])));
 
 export function builtinKindNames() {
   return [...BUILTIN_KINDS.keys()].sort();
@@ -44,6 +44,11 @@ export function validateKindsOption(kinds) {
 // Built-ins always win, so a caller can never swap out json-api behind an
 // adapter's back. Caller kinds are looked up as own properties only: a kind
 // named "constructor" must not resolve to Object.prototype.constructor.
+/**
+ * @param {any} name
+ * @param {Record<string, import('../types.mjs').Kind>} [callerKinds]
+ * @returns {import('../types.mjs').Kind | null}
+ */
 export function resolveKind(name, callerKinds = undefined) {
   if (BUILTIN_KINDS.has(name)) return BUILTIN_KINDS.get(name);
   if (callerKinds === null || typeof callerKinds !== 'object') return null;

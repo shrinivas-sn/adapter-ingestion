@@ -12,6 +12,11 @@ const MAX_ERROR_SAMPLES = 20;
 // pollution surface. Object.hasOwn gates every step; a JSON.parse-created
 // own "__proto__" key is read like any other own key, and an absent one
 // stays absent instead of leaking the prototype.
+/**
+ * @param {any} obj
+ * @param {string} path
+ * @returns {any}
+ */
 export function getPath(obj, path) {
   if (path === '$') return obj;
   let cur = obj;
@@ -57,6 +62,12 @@ function safeSourceUrl(v) {
   }
 }
 
+/**
+ * @param {any[]} rawItems
+ * @param {import('./types.mjs').Adapter} adapter
+ * @param {{ fetchedAt: string }} options
+ * @returns {{ records: import('./types.mjs').StoreRecord[], errors: any[], errorCount: number, fieldFailures: Record<string, number> }}
+ */
 export function extractAll(rawItems, adapter, { fetchedAt }) {
   const records = [];
   const errors = [];

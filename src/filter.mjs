@@ -91,6 +91,10 @@ function validateRuleShape(rule, need) {
   }
 }
 
+/**
+ * @param {any} filterDef
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
 export function validateFilter(filterDef) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
@@ -117,6 +121,12 @@ function assertValidNow(now) {
   }
 }
 
+/**
+ * @param {import('./types.mjs').StoreRecord} record
+ * @param {any} rule
+ * @param {Date} [now]
+ * @returns {boolean}
+ */
 export function evaluateRule(record, rule, now = new Date()) {
   const errors = [];
   validateRuleShape(rule, (cond, msg) => { if (!cond) errors.push(msg); });
@@ -132,6 +142,12 @@ export function evaluateRule(record, rule, now = new Date()) {
   return fn(value, rule, now);
 }
 
+/**
+ * @param {import('./types.mjs').StoreRecord[]} records
+ * @param {any} filterDef
+ * @param {Date} [now]
+ * @returns {{ kept: import('./types.mjs').StoreRecord[], dropped: import('./types.mjs').StoreRecord[] }}
+ */
 export function applyFilter(records, filterDef, now = new Date()) {
   const { ok, errors } = validateFilter(filterDef);
   if (!ok) {

@@ -3,6 +3,10 @@ import { IngestionError } from './errors.mjs';
 
 const MAX_FIELD_DEPTH = 100;
 
+/**
+ * @param {any} value
+ * @returns {string}
+ */
 export function canonicalize(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
@@ -10,6 +14,10 @@ export function canonicalize(value) {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalize(value[k])}`).join(',')}}`;
 }
 
+/**
+ * @param {Record<string, any>} fields
+ * @returns {string}
+ */
 export function contentHash(fields) {
   return createHash('sha256').update(canonicalize(fields)).digest('hex');
 }
@@ -33,6 +41,11 @@ function containerKeys(v) {
 // MAX_FIELD_DEPTH so a pathological direct-JS structure can't blow the call
 // stack. Iterative, not recursive, for the same reason: depth is bounded by
 // data, not by how deep a recursive call can safely go.
+/**
+ * @param {any} root
+ * @param {string} [rootPath]
+ * @returns {void}
+ */
 export function assertNoUndefined(root, rootPath = '$') {
   if (root === undefined) throw new IngestionError('E_RECORD_INVALID', `undefined value at ${rootPath}`);
   if (root === null || typeof root !== 'object') return;
@@ -80,6 +93,10 @@ export function assertNoUndefined(root, rootPath = '$') {
 
 // source_id: a non-whitespace-only string, or a finite number. Zero is valid;
 // null/undefined/boolean/object/array/Infinity/NaN are not.
+/**
+ * @param {any} v
+ * @returns {boolean}
+ */
 export function isValidSourceId(v) {
   if (typeof v === 'number') return Number.isFinite(v);
   if (typeof v === 'string') return v.trim() !== '';
@@ -89,6 +106,10 @@ export function isValidSourceId(v) {
 // source_url: a nonempty absolute http(s) URL with no embedded credentials.
 // Cross-host deep links are allowed — this is not a provenance check (that
 // lives in config.mjs, comparing adapter.access.url against adapter.host).
+/**
+ * @param {any} v
+ * @returns {boolean}
+ */
 export function isValidSourceUrl(v) {
   if (typeof v !== 'string' || v.length === 0) return false;
   let u;
@@ -104,6 +125,10 @@ function isValidIsoTimestamp(v) {
   return typeof v === 'string' && v.length > 0 && !Number.isNaN(Date.parse(v));
 }
 
+/**
+ * @param {{ host: string, sourceId: any, sourceUrl: string, fields: Record<string, any>, raw: any, fetchedAt: string }} input
+ * @returns {import('./types.mjs').StoreRecord}
+ */
 export function buildRecord({ host, sourceId, sourceUrl, fields, raw, fetchedAt }) {
   if (!isValidSourceId(sourceId)) {
     throw new IngestionError('E_RECORD_INVALID',

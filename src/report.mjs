@@ -5,6 +5,11 @@ import { IngestionError } from './errors.mjs';
 
 const MAX_SAMPLES = 20;
 
+/**
+ * Build a v2 run report object.
+ * @param {Record<string, any>} fields
+ * @returns {import('./types.mjs').Report}
+ */
 export function buildReport({
   host = null, startedAt, finishedAt, stages,
   errors = [], errorCount = errors.length,
@@ -84,6 +89,11 @@ function reportFilename(report) {
 // the run_id in the final name means two reports with the exact same
 // started_at (a fast successive run, a clock with second resolution) still
 // get distinct files rather than one silently overwriting the other.
+/**
+ * @param {string} dir
+ * @param {import('./types.mjs').Report} report
+ * @returns {Promise<string>} the written file path
+ */
 export async function writeReport(dir, report) {
   try {
     await mkdir(dir, { recursive: true });
@@ -156,6 +166,12 @@ async function readOneReport(dir, name) {
 // checking eligibility -- a long run of recent ineligible reports must not
 // starve out older eligible ones -- and never loads more bodies than
 // necessary to decide.
+/**
+ * @param {string} dir
+ * @param {number} limit
+ * @param {(report: import('./types.mjs').Report) => boolean} [isEligible]
+ * @returns {Promise<import('./types.mjs').Report[]>}
+ */
 export async function readEligibleHistory(dir, limit, isEligible = () => true) {
   let names;
   try {
@@ -177,6 +193,11 @@ export async function readEligibleHistory(dir, limit, isEligible = () => true) {
 
 // Kept for existing simple "newest N valid reports" callers -- no
 // eligibility filter beyond the shape validation every report goes through.
+/**
+ * @param {string} dir
+ * @param {number} [limit]
+ * @returns {Promise<import('./types.mjs').Report[]>}
+ */
 export async function readHistory(dir, limit = 5) {
   return readEligibleHistory(dir, limit);
 }

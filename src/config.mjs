@@ -299,6 +299,11 @@ function validateCanary(adapter, need) {
   }
 }
 
+/**
+ * @param {any} adapter
+ * @param {{ kinds?: Record<string, import('./types.mjs').Kind> }} [options]
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
 export function validateAdapterConfig(adapter, { kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
@@ -338,6 +343,11 @@ export function validateAdapterConfig(adapter, { kinds } = {}) {
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * @param {any} adapter
+ * @param {{ since?: string, kinds?: Record<string, import('./types.mjs').Kind> }} [options]
+ * @returns {{ ok: boolean, errors: string[] }}
+ */
 export function validateFetchConfig(adapter, { since, kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };

@@ -106,7 +106,7 @@ async function finalizeReport(runsDir, reportFields, primaryError, history = nul
 
   if (writeErr) {
     const err = new IngestionError('E_REPORT_WRITE', `failed to write report: ${writeErr.message}`, { cause: writeErr });
-    err.report = report;
+    /** @type {any} */ (err).report = report;
     throw err;
   }
 
@@ -292,6 +292,11 @@ async function lockedRun(ctx) {
   }
 }
 
+/**
+ * Run one ingestion: fetch, extract, dedupe, store, canary, report.
+ * @param {import('./types.mjs').RunIngestOptions} options
+ * @returns {Promise<import('./types.mjs').RunResult>}
+ */
 export async function runIngest({ adapter, paths, since, fetchImpl, signal, kinds, now = new Date(), store = { max_line_bytes: 64_000_000 } }) {
   validateRunOptions({ paths, now, signal, kinds });
 

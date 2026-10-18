@@ -35,6 +35,13 @@ async function readLines(file) {
 // bounded by appendHistory, so it is read whole. A line that is not a
 // usable summary is skipped with a warning, the same way the store treats
 // a corrupt line.
+/**
+ * @param {string} file
+ * @param {number} limit
+ * @param {(entry: any) => boolean} isEligible
+ * @param {{ onWarning?: (warning: { code: string, line: number }) => void }} [options]
+ * @returns {Promise<any[]>}
+ */
 export async function readHistoryFile(file, limit, isEligible, { onWarning } = {}) {
   const lines = await readLines(file);
   const out = [];
