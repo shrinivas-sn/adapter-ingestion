@@ -164,6 +164,10 @@ of the `E_*` constants named per function.
   `AbortSignal`) cancels an in-flight fetch/wait; a cancellation that lands after the store
   append already committed does not roll back that commit. `kinds` registers your own
   formats (see [Source kinds](#source-kinds)); a malformed one is `E_OPTIONS`.
+  `paths.historyFile` (optional) keeps the canary's run history in one small file you can
+  commit (see [Canary history on CI](#canary-history-on-ci)); it must differ from
+  `paths.storeFile`. `report.notices` lists advice and deprecations for this adapter (see
+  [Reading a run report](#reading-a-run-report)).
 - Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a registered kind threw),
   `E_PARSE_NO_MATCH` (`html.script` matched nothing), `E_KIND_DEPENDENCY` (`html` without
   `cheerio` installed).
@@ -335,6 +339,38 @@ unchanged,written}` explain the numbers; `error_count`/`errors` (capped at 20 sa
 notices respectively. `canary.breaches` names which threshold tripped
 (`min_records`/`required_field_ratio`/`count_drop_ratio`/`staleness`) when
 `canary.status === "stale"`. Full v2 schema: [MIGRATION-0.2.md](MIGRATION-0.2.md).
+
+`notices` (since 0.4) is a list of advice (`A_*`) and deprecations (`D_*`) about this
+adapter: what this engine version offers it, and anything it uses that will be removed.
+Each notice has `code`, `kind` (`"advice"` or `"deprecation"`), `message`, `since`, `docs`,
+and optionally `path` (the adapter key involved) and `removed_in`. Notices never change
+`outcome` or an exit code, and they never contain values, URLs or headers, so they are safe
+to log. Read them after every upgrade. `report_version` is still `2`: new keys are additive
+(see [VERSIONING.md](VERSIONING.md)).
+
+### Canary history on CI
+
+`count_drop_ratio` compares this run with the median of past runs, read from
+`runs/<host>/`. A scheduled CI job that starts from a fresh checkout has no `runs/`, so the
+check never has history and never fires; every run then carries an `A_CANARY_NO_HISTORY`
+notice. Fix it by keeping the history in a file you commit next to the store:
+
+```js
+await runIngest({
+  adapter,
+  paths: {
+    storeFile: 'store/example.gov.jsonl',
+    runsDir: 'runs/example.gov',
+    historyFile: 'store/example.gov.history.jsonl',
+  },
+});
+```
+
+Each line holds one finished run's `report_version`, `run_id`, `host`,
+`adapter_fingerprint`, `mode`, `outcome`, `started_at` and `stages`, and nothing else (no
+errors, URLs or headers). The file keeps the newest `max(50, 2 × median_window)` lines and
+is rewritten atomically under the store lock. With `historyFile` set, the canary reads
+history only from it. A run that fails validation or cannot take the lock adds no line.
 
 ## Gotchas
 
