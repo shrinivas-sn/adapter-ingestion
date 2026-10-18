@@ -43,6 +43,8 @@ After bumping, read `notices` in the first run report, or run
 - **Canary history on CI:** set `paths.historyFile` (for example
   `store/<host>.history.jsonl`) and commit it with the store, so `count_drop_ratio` works
   when `runs/` does not survive between runs. See the README section "Canary history on CI".
+- **Command line:** `npx adapter-ingestion validate|run|explain|doctor`, each with
+  `--json`. `doctor --check-updates` tells you when a newer version is out.
 - **Editor support for adapters:** add
   `"$schema": "./node_modules/@shrinivas-sn/adapter-ingestion/schema/adapter.schema.json"`
   to an adapter. It does not change the adapter's fingerprint, so canary history is kept.

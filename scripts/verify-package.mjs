@@ -298,11 +298,26 @@ async function main() {
     const typesResult = await node([tscPath, '-p', join(consumerDir, 'tsconfig.json')], consumerDir);
     if (typesResult.code !== 0) fail('the TypeScript consumer did not type-check', typesResult.stdout || typesResult.stderr);
 
+    // 8. The installed bin: through npm's own bin link (what `npx` uses),
+    // and directly by path. Both must answer with the frozen --json shape.
+    await writeFile(join(consumerDir, 'cli-adapter.json'), JSON.stringify({
+      version: 1, host: 'example.test',
+      access: { tier: 0, kind: 'json-api', url: 'https://example.test/api' },
+      map: { source_id: { path: 'id' }, url: { path: 'link' } },
+    }));
+    const viaLink = await npm(['exec', '--no', '--', 'adapter-ingestion', 'validate', 'cli-adapter.json', '--json'], consumerDir);
+    if (viaLink.code !== 0) fail('the installed adapter-ingestion bin failed (npm exec)', viaLink.stderr || viaLink.stdout);
+    const linkOut = JSON.parse(viaLink.stdout.trim().split('\n').pop());
+    if (linkOut.ok !== true) fail('adapter-ingestion validate did not accept a valid adapter', viaLink.stdout);
+    const cliPath = join(consumerDir, 'node_modules', '@shrinivas-sn', 'adapter-ingestion', 'src', 'cli.mjs');
+    const direct = await node([cliPath, 'explain', 'E_FETCH', '--json'], consumerDir);
+    if (direct.code !== 0 || JSON.parse(direct.stdout).code !== 'E_FETCH') fail('adapter-ingestion explain failed', direct.stderr || direct.stdout);
+
     const result = {
       tarball: packInfo.filename, version: packInfo.version, integrity: packInfo.integrity,
       shasum: packInfo.shasum, entryCount: packInfo.entryCount,
       files: packInfo.files.map((f) => f.path).sort(),
-      consumerChecks: [...consumerOutput.checks, ...htmlOutput.checks, 'types'],
+      consumerChecks: [...consumerOutput.checks, ...htmlOutput.checks, 'types', 'bin'],
       platform: process.platform, nodeVersion: process.version,
     };
     console.log('verify-package: PASS');

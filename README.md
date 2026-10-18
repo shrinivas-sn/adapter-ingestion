@@ -149,6 +149,33 @@ try {
 Run it twice — the second run reports `fresh: 0` and `unchanged: 2`; nothing new gets
 appended to `store/example.test.jsonl`.
 
+## Command line
+
+The package installs an `adapter-ingestion` command (since 0.4). Run it with `npx`:
+
+| Command | What it does | Network |
+|---|---|---|
+| `adapter-ingestion validate <adapter.json>` | Checks an adapter offline and lists every error | none |
+| `adapter-ingestion run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]` | Runs one ingestion. Defaults: `store/<host>.jsonl`, `runs/<host>` | the adapter's source only |
+| `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `A_*` or `D_*` code | none |
+| `adapter-ingestion doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]` | Validates, checks Node and the optional `cheerio` peer, and lists notices. `--check-updates` asks the npm registry for the latest version | none, unless `--check-updates` |
+
+Every command takes `--json` and then prints exactly one JSON object on stdout:
+
+- `validate`: `{ ok, errors }`
+- `run`: `{ outcome, stages, canary, notices, failure }`
+- `explain`: `{ code, kind, meaning, cause, fix }`
+- `doctor`: `{ ok, errors, notices, environment: { node, node_ok, cheerio } }`, plus
+  `update: { status, current, latest }` with `--check-updates`
+- a usage or load error: `{ error: { code, message } }`
+
+Exit codes: `0` ok; `1` a stale run, an operational error or an abort; `2` a usage or
+configuration problem (bad arguments, an invalid adapter, an unsupported Node version, or
+an html adapter without `cheerio`). Without `--json`, `run` prints a summary on stdout and
+notices and failures on stderr. These commands, flags, keys and exit codes are part of the
+public surface ([VERSIONING.md](VERSIONING.md)). The older `node src/run.mjs <adapter.json>`
+entry point still works unchanged.
+
 ## API
 
 Every function below has a stable input/output/error contract. `error.code` is always one

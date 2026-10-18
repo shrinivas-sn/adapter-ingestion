@@ -4,7 +4,8 @@
 // E_* error code, and the report/record keys. Refactors must leave all of them unchanged.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildReport } from '../src/report.mjs';
@@ -121,5 +122,39 @@ test('code catalog covers exactly the frozen codes', async () => {
     for (const field of ['kind', 'meaning', 'cause', 'fix']) {
       assert.ok(typeof entry[field] === 'string' && entry[field].length > 0, `${code}.${field}`);
     }
+  }
+});
+
+// The CLI surface (src/cli.mjs, package.json "bin"): command names and the
+// top-level keys of each command's --json object. Exit codes and the run/
+// doctor key lists are asserted literally in test/cli-bin.test.mjs.
+const CLI_COMMANDS = ['doctor', 'explain', 'run', 'validate'];
+const CLI_JSON_KEYS = {
+  validate: ['ok', 'errors'],
+  explain: ['code', 'kind', 'meaning', 'cause', 'fix'],
+  run: ['outcome', 'stages', 'canary', 'notices', 'failure'],
+  doctor: ['ok', 'errors', 'notices', 'environment'],
+  error: ['error'],
+};
+
+test('cli surface: bin name, command list and --json keys are frozen', async () => {
+  const pkg = JSON.parse(await readFile(new URL('package.json', ROOT), 'utf8'));
+  assert.deepEqual(pkg.bin, { 'adapter-ingestion': './src/cli.mjs' });
+  const { runBin, VALID_ADAPTER } = await import('./helpers/bin.mjs');
+  const help = await runBin(['--help']);
+  const listed = [...help.stdout.matchAll(/^ {2}([a-z]+) /gm)].map((m) => m[1]).sort();
+  assert.deepEqual(listed, CLI_COMMANDS);
+
+  const dir = await mkdtemp(join(tmpdir(), 'freeze-cli-'));
+  try {
+    await writeFile(join(dir, 'a.json'), JSON.stringify(VALID_ADAPTER));
+    const keysOf = async (args) => Object.keys(JSON.parse((await runBin(args, { cwd: dir })).stdout));
+    assert.deepEqual(await keysOf(['validate', 'a.json', '--json']), CLI_JSON_KEYS.validate);
+    assert.deepEqual(await keysOf(['explain', 'E_FETCH', '--json']), CLI_JSON_KEYS.explain);
+    assert.deepEqual(await keysOf(['doctor', 'a.json', '--json']), CLI_JSON_KEYS.doctor);
+    assert.deepEqual(await keysOf(['run', 'a.json', '--store', 'x', '--history', 'x', '--json']), CLI_JSON_KEYS.error);
+    // run's success keys need a live source: test/cli-bin.test.mjs checks them against CLI_JSON_KEYS.run's literal.
+  } finally {
+    await rm(dir, { recursive: true, force: true });
   }
 });
