@@ -12,6 +12,10 @@ import { pathToFileURL } from 'node:url';
 import { validateAdapter } from './adapter.mjs';
 import { runIngest } from './run.mjs';
 import { safeFailure } from './errors.mjs';
+import { collectNotices } from './notices.mjs';
+import { readEligibleHistory } from './report.mjs';
+import { readHistoryFile } from './history.mjs';
+import { computeAdapterFingerprint, isEligibleForMedian } from './fingerprint.mjs';
 import { CODES } from './codes.mjs';
 
 const EXIT_OK = 0;
@@ -26,6 +30,9 @@ commands:
   run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]
                             ingest once; defaults: store/<host>.jsonl, runs/<host>
   explain <CODE>            what an E_*, A_* or D_* code means, and the fix
+  doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]
+                            validate, check the environment, list notices;
+                            --check-updates asks the npm registry for the latest version
 
 every command accepts --json: one JSON object on stdout, nothing else`;
 
@@ -33,6 +40,13 @@ const JSON_FLAG = { json: { type: 'boolean' } };
 const COMMANDS = {
   validate: { options: { ...JSON_FLAG }, run: validateCommand },
   explain: { options: { ...JSON_FLAG }, run: explainCommand },
+  doctor: {
+    options: {
+      ...JSON_FLAG, runs: { type: 'string' }, history: { type: 'string' },
+      'check-updates': { type: 'boolean' },
+    },
+    run: doctorCommand,
+  },
   run: {
     options: {
       ...JSON_FLAG, since: { type: 'string' }, store: { type: 'string' },
@@ -158,6 +172,114 @@ async function runCommand({ positionals, values }) {
   }
   if (thrown) return CONFIG_ERROR_CODES.has(report.failure?.code) ? EXIT_CONFIG : EXIT_OPERATIONAL;
   return report.outcome === 'ok' ? EXIT_OK : EXIT_OPERATIONAL;
+}
+
+const PACKAGE_NAME = '@shrinivas-sn/adapter-ingestion';
+const UPDATE_TIMEOUT_MS = 5000;
+
+async function ownPackage() {
+  return JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+}
+
+// engines.node is a single ">=X.Y.Z" range in this package; compared
+// numerically, part by part.
+function satisfiesMinimum(version, range) {
+  const min = /^>=\s*(\d+)\.(\d+)\.(\d+)$/.exec(String(range).trim());
+  if (!min) return true;
+  const have = version.split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    const want = Number(min[i + 1]);
+    if (have[i] !== want) return have[i] > want;
+  }
+  return true;
+}
+
+function cheerioResolves() {
+  try {
+    import.meta.resolve('cheerio');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Opt-in only (--check-updates): the one network call the CLI makes on its
+// own. A registry mirror can be named with ADAPTER_INGESTION_REGISTRY. Any
+// failure is "unavailable", never a crash and never a different exit code.
+async function checkUpdates(current) {
+  const registry = (process.env.ADAPTER_INGESTION_REGISTRY ?? 'https://registry.npmjs.org').replace(/\/+$/, '');
+  try {
+    const res = await fetch(`${registry}/${PACKAGE_NAME.replace('/', '%2f')}/latest`,
+      { signal: AbortSignal.timeout(UPDATE_TIMEOUT_MS), redirect: 'error' });
+    if (!res.ok) return { status: 'unavailable', current, latest: null };
+    const { version } = await res.json();
+    if (typeof version !== 'string') return { status: 'unavailable', current, latest: null };
+    return { status: version === current ? 'current' : 'available', current, latest: version };
+  } catch {
+    return { status: 'unavailable', current, latest: null };
+  }
+}
+
+// How many comparable past snapshot runs exist, judged exactly as the
+// canary judges them (same host, same fingerprint, ok, v2).
+async function countHistory(adapter, { runs, history }) {
+  const fingerprint = computeAdapterFingerprint(adapter);
+  const limit = adapter.canary?.median_window ?? 5;
+  const startedAtIso = new Date().toISOString();
+  const isEligible = (c) => isEligibleForMedian(c, { host: adapter.host, fingerprint, startedAtIso });
+  const found = history !== undefined
+    ? await readHistoryFile(history, limit, isEligible)
+    : await readEligibleHistory(runs ?? `runs/${adapter.host}`, limit, isEligible);
+  return found.length;
+}
+
+async function doctorCommand({ positionals, values }) {
+  const adapterPath = onePositional(positionals, 'an adapter.json path');
+  const loaded = await loadAdapter(adapterPath);
+  if (loaded.error) {
+    printError(values.json, loaded.error.code, loaded.error.message);
+    return EXIT_CONFIG;
+  }
+  const { adapter } = loaded;
+  const pkg = await ownPackage();
+  const { ok: valid, errors } = validateAdapter(adapter);
+
+  const environment = {
+    node: process.versions.node,
+    node_ok: satisfiesMinimum(process.versions.node, pkg.engines?.node),
+    cheerio: adapter?.access?.kind === 'html' ? cheerioResolves() : null,
+  };
+
+  let notices = [];
+  if (valid) {
+    try {
+      const historyCount = await countHistory(adapter, values);
+      notices = collectNotices(adapter, { mode: 'snapshot', historyCount, usesHistoryFile: values.history !== undefined });
+    } catch (err) {
+      errors.push(`could not read run history: ${safeFailure(err, 'doctor').message}`);
+    }
+  }
+
+  const ok = errors.length === 0 && environment.node_ok && environment.cheerio !== false;
+  const out = { ok, errors, notices, environment };
+  if (values['check-updates']) out.update = await checkUpdates(pkg.version);
+
+  if (values.json) {
+    console.log(JSON.stringify(out));
+  } else {
+    console.log(`${ok ? 'ok' : 'problems found'}: ${adapterPath}`);
+    for (const e of errors) console.log(`  error: ${e}`);
+    if (!environment.node_ok) console.log(`  error: Node ${environment.node} is below the supported ${pkg.engines?.node}`);
+    if (environment.cheerio === false) console.log('  error: html adapters need the optional peer: npm install cheerio');
+    for (const n of notices) console.log(`  notice ${n.code}: ${n.message}`);
+    if (out.update) {
+      const u = out.update;
+      console.log(u.status === 'available' ? `  update: ${u.latest} is available (installed ${u.current}); read UPGRADING.md`
+        : u.status === 'current' ? `  update: ${u.current} is the latest version`
+        : '  update: could not reach the registry');
+    }
+  }
+  return ok ? EXIT_OK : EXIT_CONFIG;
 }
 
 async function explainCommand({ positionals, values }) {

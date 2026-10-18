@@ -184,3 +184,89 @@ test('bin run: an adapter with no host is refused before any path is derived', a
   assert.match(stderr, /no usable "host"/);
   assert.deepEqual((await readdir(cwd)).sort(), ['adapter.json']);
 });
+
+// --- doctor ---
+
+test('bin doctor: a valid adapter with no history exits 0 with A_CANARY_NO_HISTORY; --json keys are frozen', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify(VALID_ADAPTER));
+  const { code, stdout } = await runBin(['doctor', 'a.json', '--json'], { cwd });
+  assert.equal(code, 0);
+  const out = JSON.parse(stdout);
+  assert.deepEqual(Object.keys(out), ['ok', 'errors', 'notices', 'environment']);
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.notices.map((n) => n.code), ['A_CANARY_NO_HISTORY']);
+  assert.deepEqual(Object.keys(out.environment), ['node', 'node_ok', 'cheerio']);
+  assert.equal(out.environment.node_ok, true);
+  assert.equal(out.environment.cheerio, null);
+});
+
+test('bin doctor: a history file with one eligible run clears the advice', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  assert.equal((await runBin(['run', 'adapter.json', '--history', 'h.jsonl'], { cwd })).code, 0);
+  const { code, stdout } = await runBin(['doctor', 'adapter.json', '--history', 'h.jsonl', '--json'], { cwd });
+  assert.equal(code, 0);
+  assert.deepEqual(JSON.parse(stdout).notices, []);
+});
+
+test('bin doctor: past reports in the runs directory count as history too', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  assert.equal((await runBin(['run', 'adapter.json'], { cwd })).code, 0);
+  const { stdout } = await runBin(['doctor', 'adapter.json', '--json'], { cwd });
+  assert.deepEqual(JSON.parse(stdout).notices, []);
+});
+
+test('bin doctor: an invalid adapter exits 2 with its errors', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify({ ...VALID_ADAPTER, version: 2 }));
+  const { code, stdout } = await runBin(['doctor', 'a.json', '--json'], { cwd });
+  assert.equal(code, 2);
+  const out = JSON.parse(stdout);
+  assert.equal(out.ok, false);
+  assert.ok(out.errors.includes('version must be 1'));
+  assert.deepEqual(out.notices, []);
+});
+
+test('bin doctor: an html adapter reports whether cheerio resolves', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify({
+    ...VALID_ADAPTER, access: { tier: 2, kind: 'html', url: 'https://example.test/list' },
+    html: { mode: 'select', rows: 'tr', fields: { id: { attr: 'id' }, link: { selector: 'a', attr: 'href' }, title: { selector: 'a' } } },
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title' } },
+  }));
+  const { stdout } = await runBin(['doctor', 'a.json', '--json'], { cwd });
+  // This repo has cheerio as a devDependency, so it resolves here.
+  assert.equal(JSON.parse(stdout).environment.cheerio, true);
+});
+
+test('bin doctor --check-updates: a newer registry version is "available"', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify(VALID_ADAPTER));
+  const { origin, close } = await startServer({
+    default: (req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ version: '9.9.9' }));
+    },
+  });
+  t.after(close);
+  const { code, stdout } = await runBin(['doctor', 'a.json', '--json', '--check-updates'],
+    { cwd, env: { ADAPTER_INGESTION_REGISTRY: origin } });
+  assert.equal(code, 0);
+  const out = JSON.parse(stdout);
+  assert.deepEqual(Object.keys(out), ['ok', 'errors', 'notices', 'environment', 'update']);
+  assert.equal(out.update.status, 'available');
+  assert.equal(out.update.latest, '9.9.9');
+});
+
+test('bin doctor --check-updates: an unreachable registry is "unavailable", exit code unchanged', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify(VALID_ADAPTER));
+  const { origin, close } = await startServer({});
+  await close();
+  const { code, stdout } = await runBin(['doctor', 'a.json', '--json', '--check-updates'],
+    { cwd, env: { ADAPTER_INGESTION_REGISTRY: origin } });
+  assert.equal(code, 0);
+  assert.deepEqual(JSON.parse(stdout).update, { status: 'unavailable', current: JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version, latest: null });
+});

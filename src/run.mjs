@@ -1,10 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { validateAdapter } from './adapter.mjs';
 import { validateFetchConfig } from './config.mjs';
 import { validateKindsOption } from './kinds/index.mjs';
-import { canonicalize } from './contract.mjs';
+import { computeAdapterFingerprint, isEligibleForMedian } from './fingerprint.mjs';
 import { fetchAll } from './fetch.mjs';
 import { extractAll } from './extract.mjs';
 import { readIndex, appendRecords, withStoreLock } from './store.mjs';
@@ -43,44 +43,12 @@ function newestValueOf(records, fieldName) {
   return best;
 }
 
-// Excludes metadata/since/clock -- the fingerprint identifies the adapter's
-// *behavioral contract* (what it fetches and how records are shaped), not
-// incidental bookkeeping. Explicit defaults vs. omitted ones can produce a
-// different fingerprint even for equivalent configs; documented, not fixed,
-// since normalizing that away would need its own validated defaulting pass.
-function computeAdapterFingerprint(adapter) {
-  const canonicalInput = {
-    version: adapter.version, host: adapter.host, access: adapter.access,
-    fetch: adapter.fetch ?? {}, records_path: adapter.records_path ?? '$',
-    map: adapter.map, required: adapter.required ?? [], canary: adapter.canary ?? {},
-    // html decides what a record is, so it is part of the contract; added only
-    // when present so every json-api fingerprint stays byte-identical.
-    ...(adapter.html !== undefined ? { html: adapter.html } : {}),
-  };
-  return createHash('sha256').update(canonicalize(canonicalInput)).digest('hex');
-}
-
 function emptyStages() {
   return { fetched: 0, parsed: 0, fresh: 0, changed: 0, unchanged: 0, written: 0 };
 }
 
 function notEvaluatedCanary() {
   return { status: 'not_evaluated', breaches: [], skipped: [] };
-}
-
-// A median candidate must be a genuinely comparable, trustworthy past
-// snapshot run of *this exact adapter behavior* on *this exact host* --
-// never a legacy (pre-v2), incremental, different-fingerprint, failed, or
-// (defensively) future-dated report. Repeated failures must never train the
-// baseline downward: only outcome 'ok' counts.
-function isEligibleForMedian(candidate, { host, fingerprint, startedAtIso }) {
-  return candidate.report_version === 2
-    && candidate.outcome === 'ok'
-    && candidate.host === host
-    && candidate.adapter_fingerprint === fingerprint
-    && candidate.mode === 'snapshot'
-    && typeof candidate.started_at === 'string'
-    && candidate.started_at < startedAtIso;
 }
 
 // One finalize path for every exit -- success, a fatal mid-run failure, a
