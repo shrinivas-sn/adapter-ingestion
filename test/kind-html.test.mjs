@@ -195,3 +195,20 @@ test('script_json validation: any records_path is allowed; script is required an
   assert.ok(errorsFor({ mode: 'script_json', script: 's', rows: 'tr' })
     .includes('html.rows: unknown key (a typo, or a field from a newer version)'));
 });
+
+test('select mode refuses more rows than max_records before building any record', async () => {
+  const spec = { mode: 'select', rows: 'li', fields: { title: {} } };
+  const page = `<ul>${'<li>x</li>'.repeat(10)}</ul>`;
+  const bytes = Buffer.from(page);
+  await assert.rejects(
+    htmlKind.parse({ bytes, contentType: 'text/html', url: PAGE_URL, adapter: adapterWith(spec), limits: { maxRecords: 5, remainingRecords: 3 } }),
+    { code: 'E_RECORD_LIMIT', message: 'fetch exceeded max_records (5)' },
+  );
+  const ok = await htmlKind.parse({ bytes, contentType: 'text/html', url: PAGE_URL, adapter: adapterWith(spec), limits: { maxRecords: 10, remainingRecords: 10 } });
+  assert.equal(ok.length, 10);
+});
+
+test('validation rejects a whitespace-only selector', () => {
+  const errors = validateAdapter(adapterWith({ ...SELECT, rows: '   ' })).errors;
+  assert.ok(errors.includes('html.rows must be a nonempty string of at most 500 characters'), errors.join(' | '));
+});

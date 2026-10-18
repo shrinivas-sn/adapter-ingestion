@@ -38,6 +38,9 @@ function computeAdapterFingerprint(adapter) {
     version: adapter.version, host: adapter.host, access: adapter.access,
     fetch: adapter.fetch ?? {}, records_path: adapter.records_path ?? '$',
     map: adapter.map, required: adapter.required ?? [], canary: adapter.canary ?? {},
+    // html decides what a record is, so it is part of the contract; added only
+    // when present so every json-api fingerprint stays byte-identical.
+    ...(adapter.html !== undefined ? { html: adapter.html } : {}),
   };
   return createHash('sha256').update(canonicalize(canonicalInput)).digest('hex');
 }

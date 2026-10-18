@@ -103,3 +103,54 @@ test('an async kind is awaited', async () => {
     assert.equal(report.stages.fresh, 1);
   });
 });
+
+test('fetchAll passes max_records to an html page, so a huge page fails before it is materialised', async () => {
+  const { fetchAll } = await import('../src/fetch.mjs');
+  const page = `<ul>${'<li><a href="/x">x</a></li>'.repeat(50)}</ul>`;
+  const adapter = {
+    version: 1, host: 'example.test',
+    access: { tier: 2, kind: 'html', url: 'https://example.test/' },
+    fetch: { max_records: 20 },
+    html: { mode: 'select', rows: 'li', fields: { link: { selector: 'a', attr: 'href', resolve_url: true } } },
+  };
+  const fetchImpl = async () => new Response(page, { headers: { 'content-type': 'text/html' } });
+  await assert.rejects(fetchAll(adapter, { fetchImpl }), { code: 'E_RECORD_LIMIT', message: 'fetch exceeded max_records (20)' });
+});
+
+test('records a kind cannot serialise are E_PARSE, not a raw TypeError', async () => {
+  await withCsvServer('x', async ({ adapter, paths }) => {
+    await assert.rejects(runIngest({ adapter, paths, kinds: { csv: { parse: () => [{ id: 1n }] } } }), { code: 'E_PARSE' });
+  });
+});
+
+test('even an IngestionError thrown inside a caller kind becomes a generic E_PARSE', async () => {
+  const { buildRecord } = await import('../src/contract.mjs');
+  // A caller kind that lets one of our own errors escape, carrying caller-chosen text.
+  const leaky = { parse() { buildRecord({ host: 'h', sourceId: 'secret token abc', sourceUrl: 'nope' }); } };
+  await withCsvServer('x', async ({ adapter, paths }) => {
+    await assert.rejects(runIngest({ adapter, paths, kinds: { csv: leaky } }), (err) => {
+      assert.equal(err.code, 'E_PARSE');
+      assert.equal(err.message, 'kind "csv" failed to parse the response');
+      return true;
+    });
+    assert.doesNotMatch(await readAllText(paths.runsDir), /secret token abc/);
+  });
+});
+
+test('html has a 5 MB default byte cap (DOM memory is many times the page size); an explicit cap wins', async () => {
+  const { fetchAll } = await import('../src/fetch.mjs');
+  const body = '<p>' + ' '.repeat(5_000_000) + '</p>';
+  const adapter = {
+    version: 1, host: 'example.test',
+    access: { tier: 2, kind: 'html', url: 'https://example.test/' },
+    html: { mode: 'select', rows: 'li', fields: { title: {} } },
+  };
+  const fetchImpl = async () => new Response(body, { headers: { 'content-type': 'text/html' } });
+  await assert.rejects(fetchAll(adapter, { fetchImpl }), { code: 'E_RESPONSE_LIMIT', message: 'response exceeded max_response_bytes (5000000)' });
+  const raised = { ...adapter, fetch: { max_response_bytes: 6_000_000 } };
+  assert.deepEqual((await fetchAll(raised, { fetchImpl })).items, []);
+  // json-api keeps its 20 MB default.
+  const json = { ...adapter, access: { ...adapter.access, kind: 'json-api' }, html: undefined };
+  const jsonImpl = async () => new Response(`[${' '.repeat(6_000_000)}]`);
+  assert.deepEqual((await fetchAll(json, { fetchImpl: jsonImpl })).items, []);
+});

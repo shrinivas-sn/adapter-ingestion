@@ -34,7 +34,14 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kind
   const timeoutMs = adapter.fetch?.timeout_ms ?? 30_000;
   const maxDurationMs = adapter.fetch?.max_duration_ms ?? 120_000;
   const maxRecords = adapter.fetch?.max_records ?? 5000;
-  const maxResponseBytes = adapter.fetch?.max_response_bytes ?? 20_000_000;
+  // fetchAll never validated the adapter itself (runIngest does), and it has
+  // always parsed JSON whatever access.kind said; an unresolvable kind keeps
+  // doing exactly that rather than crashing a direct caller.
+  const kind = resolveKind(adapter.access?.kind, kinds) ?? BUILTIN_KINDS.get('json-api');
+  const isBuiltinKind = BUILTIN_KINDS.get(kind.name) === kind;
+  // A kind may set a tighter default than the global one (html does: its DOM
+  // costs many times the page size); an explicit adapter value always wins.
+  const maxResponseBytes = adapter.fetch?.max_response_bytes ?? kind.defaults?.max_response_bytes ?? 20_000_000;
   const maxTotalBytes = adapter.fetch?.max_total_bytes ?? 100_000_000;
   const delayMs = adapter.fetch?.delay_ms ?? 0;
   const retryCfg = adapter.fetch?.retry ?? {};
@@ -47,10 +54,6 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kind
   const origin = new URL(adapter.access.url).origin;
   const startedAt = Date.now();
   const budget = { bytes: 0, maxBytes: maxTotalBytes };
-  // fetchAll never validated the adapter itself (runIngest does), and it has
-  // always parsed JSON whatever access.kind said; an unresolvable kind keeps
-  // doing exactly that rather than crashing a direct caller.
-  const kind = resolveKind(adapter.access?.kind, kinds) ?? BUILTIN_KINDS.get('json-api');
 
   const items = [];
   const statuses = [];
@@ -86,15 +89,19 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kind
     // was never retryable, so lifting it out of the loop changes nothing.
     let body;
     try {
-      body = await kind.parse({ bytes: buffer, contentType, url, adapter });
+      body = await kind.parse({
+        bytes: buffer, contentType, url, adapter,
+        limits: { maxRecords, remainingRecords: maxRecords - items.length },
+      });
     } catch (err) {
-      if (err instanceof IngestionError) {
+      // Built-in kinds throw our own typed errors, which pass through. Caller
+      // kind code may throw anything -- even one of our errors carrying text
+      // it chose -- that could hold a secret or a page fragment; like E_FETCH,
+      // only our own message is reported, and the original stays as .cause.
+      if (err instanceof IngestionError && isBuiltinKind) {
         err.details = { ...(err.details ?? {}), ...fetchContext() };
         throw err;
       }
-      // Caller kind code may throw anything, with text that could carry a
-      // secret or a page fragment; like E_FETCH, only our own message is
-      // reported, and the original stays in memory as .cause.
       throw new IngestionError('E_PARSE', `kind "${kind.name}" failed to parse the response`,
         { cause: err, details: fetchContext() });
     }
@@ -117,7 +124,15 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kind
     pages++;
 
     if (batch.length > 0) {
-      const digest = digestBatch(batch);
+      let digest;
+      try {
+        digest = digestBatch(batch);
+      } catch (err) {
+        // Only a caller kind can get here: JSON.parse and html output always
+        // serialise. A BigInt or a cycle is the kind's bug, not a network one.
+        throw new IngestionError('E_PARSE', `kind "${kind.name}" returned records that cannot be serialised`,
+          { cause: err, details: fetchContext() });
+      }
       if (lastBatchDigest !== null && digest === lastBatchDigest) {
         throw new IngestionError('E_PAGINATION_REPEAT',
           'pagination returned an exact repeat of the previous page — the endpoint may be ignoring the page parameter',

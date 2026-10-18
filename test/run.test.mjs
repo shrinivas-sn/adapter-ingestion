@@ -362,3 +362,23 @@ for (const host of ['earthquake.usgs.gov', 'www.karnatakacareers.org']) {
     await rm(dir, { recursive: true, force: true });
   });
 }
+
+test('the adapter fingerprint changes with the html block, and ignores it when absent', async () => {
+  const html = {
+    version: 1, host: 'example.test',
+    access: { tier: 2, kind: 'html', url: 'https://example.test/' },
+    html: { mode: 'select', rows: 'li', fields: { link: { selector: 'a', attr: 'href', resolve_url: true }, title: { selector: 'a' } } },
+    map: { source_id: { path: 'link' }, url: { path: 'link' }, title: { path: 'title' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  const fetchImpl = async () => new Response('<ul><li><a href="/a">A</a></li></ul>', { headers: { 'content-type': 'text/html' } });
+  const dir = await mkdtemp(join(tmpdir(), 'fp-'));
+  try {
+    const run = (adapter, n) => runIngest({ adapter, paths: { storeFile: join(dir, `s${n}.jsonl`), runsDir: join(dir, `r${n}`) }, fetchImpl });
+    const a = await run(html, 1);
+    const b = await run({ ...html, html: { ...html.html, rows: 'ul > li' } }, 2);
+    assert.notEqual(a.report.adapter_fingerprint, b.report.adapter_fingerprint);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

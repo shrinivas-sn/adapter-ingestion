@@ -356,7 +356,14 @@ notices respectively. `canary.breaches` names which threshold tripped
   `fetch.max_records`: 5000; `fetch.max_response_bytes`: 20MB; `fetch.max_total_bytes`:
   100MB across all pages). A source with a legitimately larger page size or slower response
   needs these raised explicitly — the defaults exist so an unattended cron run can't hang
-  indefinitely or OOM the runner on a single misbehaving or hostile response.
+  indefinitely or OOM the runner on a single misbehaving or hostile response. `html`
+  defaults to 5MB per response instead, because a parsed page takes many times its size
+  in memory; set `fetch.max_response_bytes` to change it. A page with more rows than
+  `max_records` fails before any record is built.
+- **Parsing is CPU work that `timeout_ms` does not interrupt.** The timeout covers the
+  request and the body download; `max_duration_ms` is checked again once parsing returns.
+  A pathological page (thousands of nested elements) can still take seconds to parse, so
+  keep `max_response_bytes` small for sources you don't trust.
 - **The canary's `count_drop_ratio` check needs earlier run reports.** It compares this
   run with the median of recent reports in `paths.runsDir`. A CI runner that starts from a
   fresh checkout every time has no history, so this check silently never fires. Persist

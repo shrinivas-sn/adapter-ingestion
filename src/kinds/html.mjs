@@ -28,7 +28,7 @@ function isPlainObject(v) {
 }
 
 function isBoundedString(v, max) {
-  return typeof v === 'string' && v.length > 0 && v.length <= max;
+  return typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 }
 
 function checkUnknownKeys(obj, known, label, need) {
@@ -140,7 +140,7 @@ function resolveHttpUrl(value, base) {
   return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null;
 }
 
-async function parse({ bytes, contentType, url, adapter }) {
+async function parse({ bytes, contentType, url, adapter, limits }) {
   const cheerio = await loadCheerio();
   const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const charset = charsetOf(contentType);
@@ -162,6 +162,12 @@ async function parse({ bytes, contentType, url, adapter }) {
   const { rows, fields } = adapter.html;
   const fieldEntries = Object.entries(fields);
   const rowSet = select(() => $(rows), 'html.rows');
+  // Each row becomes an object with one key per field, so a small page can
+  // expand into a huge heap (millions of tiny <li> rows within the byte cap).
+  // Refuse before building anything, with fetchAll's own max_records error.
+  if (limits !== undefined && rowSet.length > limits.remainingRecords) {
+    throw new IngestionError('E_RECORD_LIMIT', `fetch exceeded max_records (${limits.maxRecords})`);
+  }
   // Compile every field selector once up front, so a broken one fails even
   // on a page where no row matched today.
   const probe = cheerio.load('');
@@ -186,4 +192,9 @@ async function parse({ bytes, contentType, url, adapter }) {
   return items;
 }
 
-export const htmlKind = Object.freeze({ name: 'html', validate, parse });
+// 5 MB rather than the global 20 MB: parse5 builds a DOM roughly 100x the
+// page size, so a hostile 20 MB page of tiny elements needs gigabytes.
+// Real listing pages are well under 1 MB.
+const defaults = Object.freeze({ max_response_bytes: 5_000_000 });
+
+export const htmlKind = Object.freeze({ name: 'html', validate, parse, defaults });

@@ -13,7 +13,8 @@ Opt in:
   row) or `script_json` mode (the JSON inside a `<script>`, such as JSON-LD or
   `__NEXT_DATA__`). Install the optional peer first: `npm install cheerio`. Page encoding is
   detected from the BOM, the `Content-Type` charset and `<meta charset>`, with UTF-8 as the
-  fallback.
+  fallback. html responses default to a 5 MB cap (JSON keeps 20 MB), and a page with more
+  rows than `max_records` fails before any record is built.
 - The `kinds` option on `runIngest`, `fetchAll` and `validateAdapter` registers a custom
   parser (CSV, XML, ...) that gets every transport guarantee: timeouts, byte caps, retries,
   pagination checks and the canary.
