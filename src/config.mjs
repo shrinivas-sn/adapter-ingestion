@@ -1,5 +1,5 @@
 import { isValidDateOnly } from './normalize.mjs';
-import { builtinKindNames } from './kinds/index.mjs';
+import { builtinKindNames, resolveKind } from './kinds/index.mjs';
 
 const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'bool']);
 const MANDATORY_MAP_KEYS = ['source_id', 'url'];
@@ -35,7 +35,7 @@ const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
 function checkUnknownKeys(obj, known, label, need) {
   if (!isPlainObject(obj)) return;
   for (const key of Object.keys(obj)) {
-    need(known.has(key), `${label}.${key}: unknown key (typo?)`);
+    need(known.has(key), `${label}.${key}: unknown key (a typo, or a field from a newer version)`);
   }
 }
 
@@ -61,18 +61,21 @@ export function isValidPathString(path) {
   return path.split('.').every((seg) => seg.length > 0);
 }
 
-function validateAccessSection(adapter, need, { requireTier }) {
+function validateAccessSection(adapter, need, { requireTier, kinds }) {
   const access = adapter.access;
   need(isPlainObject(access), 'access is required');
-  if (!isPlainObject(access)) return;
+  if (!isPlainObject(access)) return null;
   checkUnknownKeys(access, KNOWN_ACCESS_KEYS, 'access', need);
   if (requireTier) {
     need(inIntRange(access.tier, 0, 5), 'access.tier must be an integer 0-5');
   }
-  // Only kinds this engine can actually parse pass; anything else must fail
-  // here rather than reach a fetch layer that cannot decode it.
-  const kinds = builtinKindNames();
-  need(kinds.includes(access.kind), `access.kind must be one of ${kinds.join(', ')}`);
+  // Only kinds this engine (or the caller) can actually parse pass; anything
+  // else must fail here rather than reach a fetch layer that cannot decode
+  // it. The message says why that usually happens: an adapter written for a
+  // newer engine, or a custom kind that was not passed in.
+  const kind = resolveKind(access.kind, kinds);
+  need(kind !== null, `access.kind "${access.kind}" is not supported by this engine `
+    + `(${builtinKindNames().join(', ')}); it may need a newer version or a registered kind`);
   need(typeof access.url === 'string', 'access.url is required');
   if (typeof access.url === 'string') {
     let u;
@@ -93,6 +96,7 @@ function validateAccessSection(adapter, need, { requireTier }) {
       );
     }
   }
+  return kind;
 }
 
 function validatePaginationSection(fetchCfg, need) {
@@ -283,7 +287,7 @@ function validateCanary(adapter, need) {
   }
 }
 
-export function validateAdapterConfig(adapter) {
+export function validateAdapterConfig(adapter, { kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
 
@@ -300,17 +304,19 @@ export function validateAdapterConfig(adapter) {
       'host must not use a Windows reserved device name (CON/NUL/AUX/PRN/COM1-9/LPT1-9)');
   }
 
-  validateAccessSection(adapter, need, { requireTier: true });
+  const kind = validateAccessSection(adapter, need, { requireTier: true, kinds });
   validateFetchSection(adapter, need);
   validateRecordsPath(adapter, need);
   validateMap(adapter, need);
   validateRequired(adapter, need);
   validateCanary(adapter, need);
+  // Kind-specific rules last, so the generic errors above read first.
+  kind?.validate(adapter, need);
 
   return { ok: errors.length === 0, errors };
 }
 
-export function validateFetchConfig(adapter, { since } = {}) {
+export function validateFetchConfig(adapter, { since, kinds } = {}) {
   const errors = [];
   const need = (cond, msg) => { if (!cond) errors.push(msg); };
 
@@ -318,7 +324,7 @@ export function validateFetchConfig(adapter, { since } = {}) {
     return { ok: false, errors: ['adapter must be an object'] };
   }
 
-  validateAccessSection(adapter, need, { requireTier: false });
+  validateAccessSection(adapter, need, { requireTier: false, kinds });
   validateFetchSection(adapter, need);
 
   if (since !== undefined) {
