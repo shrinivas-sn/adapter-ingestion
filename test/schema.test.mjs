@@ -5,6 +5,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import { validateAdapter } from '../src/adapter.mjs';
 import { KNOWN_KEYS } from '../src/config.mjs';
 import { HTML_KNOWN_KEYS } from '../src/kinds/html.mjs';
+import { TYPO_CHECKED_KEYS } from '../src/notices.mjs';
 
 const ROOT = new URL('../', import.meta.url);
 const schema = JSON.parse(await readFile(new URL('schema/adapter.schema.json', ROOT), 'utf8'));
@@ -86,4 +87,9 @@ test('schema drift: each section lists exactly the keys the engine knows', () =>
 
 test('schema drift: top-level keys match KNOWN_KEYS.top_level', () => {
   assert.deepEqual(Object.keys(schema.properties).sort(), KNOWN_KEYS.top_level);
+});
+
+test('schema drift: every top-level key is classified for the typo notice', () => {
+  const classified = [...new Set([...TYPO_CHECKED_KEYS, ...schema.required, '$schema', 'html'])].sort();
+  assert.deepEqual(KNOWN_KEYS.top_level, classified);
 });

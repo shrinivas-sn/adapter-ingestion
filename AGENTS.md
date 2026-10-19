@@ -134,6 +134,7 @@ Every `E_*` error, `A_*` advice and `D_*` deprecation code. For details:
 | Code | Kind | Meaning | Fix |
 |---|---|---|---|
 | `A_CANARY_NO_HISTORY` | advice | count_drop_ratio could not run: no comparable past runs were found. | Set paths.historyFile (CLI: --history) to a file you commit with the store. |
+| `A_TOP_LEVEL_KEY_TYPO` | advice | A top-level key is one edit away from fetch, records_path, required or canary, so that setting is probably misspelled and is being ignored. | Rename it to the suggested key. If it is your own metadata, start its name with _ so it is never flagged. |
 | `E_ABORTED` | error | The run was cancelled through its AbortSignal. | Nothing is wrong with the source. Run again; nothing was appended to the store after the abort. |
 | `E_ADAPTER_INVALID` | error | The adapter failed validation, so nothing was fetched. | Run `adapter-ingestion validate <adapter.json>`; it lists every error. If a key is unknown, check whether it needs a newer engine version. |
 | `E_FETCH` | error | The request failed before a response arrived. | Check the URL and network access. Connection failures are retried when fetch.retry allows it. |

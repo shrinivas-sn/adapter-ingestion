@@ -178,4 +178,10 @@ export const CODES = Object.freeze({
     cause: 'A first run, or a CI job that starts from a fresh checkout without the runs directory.',
     fix: 'Set paths.historyFile (CLI: --history) to a file you commit with the store.',
   },
+  A_TOP_LEVEL_KEY_TYPO: {
+    kind: 'advice',
+    meaning: 'A top-level key is one edit away from fetch, records_path, required or canary, so that setting is probably misspelled and is being ignored.',
+    cause: 'Top-level keys are free for your own metadata, so the validator cannot reject a misspelled one.',
+    fix: 'Rename it to the suggested key. If it is your own metadata, start its name with _ so it is never flagged.',
+  },
 });
