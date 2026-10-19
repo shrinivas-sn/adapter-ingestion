@@ -28,8 +28,10 @@ export function resolveHeaders(headers, env = process.env) {
       continue;
     }
     const details = { header: name, env: value.env };
+    // Only a string counts: process.env also answers inherited names such as
+    // toString or __proto__ with a function or object.
     const raw = env[value.env];
-    if (raw === undefined || raw === '') {
+    if (typeof raw !== 'string' || raw === '') {
       if (value.optional === true) continue;
       throw new IngestionError('E_HEADER_ENV',
         `fetch.headers.${name} reads environment variable ${value.env}, which is not set`, { details });

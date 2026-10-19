@@ -257,3 +257,25 @@ test('secret headers: the older node src/run.mjs entry point also exits 2 for E_
   assert.equal(code, 2);
   assert.equal(seen.length, 0);
 });
+
+for (const name of ['toString', 'constructor', 'valueOf', 'hasOwnProperty', '__proto__']) {
+  test(`secret headers: an unset variable named ${name} fails instead of sending an inherited value`, () => {
+    assert.throws(() => resolveHeaders({ A: { env: name } }), (err) => err.code === 'E_HEADER_ENV');
+    assert.deepEqual(resolveHeaders({ A: { env: name, optional: true } }), {});
+  });
+}
+
+test('secret headers: text-mode bin run output never contains the secret', async (t) => {
+  const cwd = await disposableCwd(t);
+  const { origin, seen } = await headerServer(t);
+  await writeRefAdapter(cwd, origin, { env: 'ADAPTER_TEST_TOKEN_1' });
+  const ok = await runBin(['run', 'adapter.json'], { cwd, env: { ADAPTER_TEST_TOKEN_1: 'SECRET-abc123' } });
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.deepEqual(seen, ['SECRET-abc123']);
+  const bad = await runBin(['run', 'adapter.json'], { cwd, env: { ADAPTER_TEST_TOKEN_1: 'SECRET\nabc123' } });
+  assert.equal(bad.code, 2);
+  assert.match(bad.stderr, /E_HEADER_ENV/);
+  for (const text of [ok.stdout, ok.stderr, bad.stdout, bad.stderr, await allFileText(cwd)]) {
+    assert.ok(!text.includes('abc123'));
+  }
+});
