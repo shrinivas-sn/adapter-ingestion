@@ -36,6 +36,10 @@ Each source is described by an **adapter**: a JSON file, not code.
 - `records_path` defaults to `"$"` (the parsed body itself is the array of records).
 - `access.url` must be on `host` (or a subdomain of it).
 - `map.source_id` and `map.url` are always required.
+- Never put an API key or token in adapter JSON. Use
+  `"fetch": { "headers": { "Authorization": { "env": "API_TOKEN" } } }` (since 0.6) and set
+  the variable where the run happens. Unset → `E_HEADER_ENV`, exit 2; add
+  `"optional": true` to send no header instead.
 - `outcome: "stale"` means the run completed but the canary tripped. It needs a look, not a
   retry.
 - Never change an adapter to make a canary pass without checking the source itself.
