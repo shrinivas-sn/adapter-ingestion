@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import Ajv2020 from 'ajv/dist/2020.js';
 import { applyNormalizer } from '../src/normalize.mjs';
+import { validateAdapter } from '../src/adapter.mjs';
 
 // iso-datetime (since 0.7): keeps the time of day and returns UTC in one
 // fixed shape. Formats below are taken from real sources (GitHub REST
@@ -73,5 +76,59 @@ test('iso-datetime: output does not depend on the machine time zone', () => {
   for (const tz of ['America/Los_Angeles', 'Asia/Kolkata', 'Pacific/Kiritimati']) {
     const out = execFileSync(process.execPath, ['-e', script], { env: { ...process.env, TZ: tz }, encoding: 'utf8' });
     assert.deepEqual(JSON.parse(out), want, `TZ=${tz}`);
+  }
+});
+
+// --- Adapters: validateAdapter and the schema ---
+
+const schema = JSON.parse(await readFile(new URL('../schema/adapter.schema.json', import.meta.url), 'utf8'));
+const validateSchema = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
+
+const withRule = (rule) => ({
+  version: 1, host: 'example.test',
+  access: { tier: 1, kind: 'json-api', url: 'https://example.test/api' },
+  map: { source_id: { path: 'id' }, url: { path: 'link' }, published: rule },
+});
+
+const VALID_RULES = [
+  { path: 'p', normalize: 'iso-datetime' },
+  { path: 'p', normalize: 'iso-datetime', assume_zone: 'Z' },
+];
+const INVALID_RULES = [
+  [{ path: 'p', normalize: 'iso-datetime', assume_zone: 'UTC' }, 'map.published.assume_zone must be "Z"'],
+  [{ path: 'p', normalize: 'iso-date', assume_zone: 'Z' }, 'map.published.assume_zone needs "normalize": "iso-datetime"'],
+  [{ path: 'p', assume_zone: 'Z' }, 'map.published.assume_zone needs "normalize": "iso-datetime"'],
+  [{ path: 'p', normalize: 'iso-datetimes' }, 'map.published: unknown normalizer "iso-datetimes"'],
+];
+
+test('validateAdapter: iso-datetime and assume_zone "Z" are accepted', () => {
+  for (const rule of VALID_RULES) {
+    const result = validateAdapter(withRule(rule));
+    assert.equal(result.ok, true, JSON.stringify(result.errors));
+  }
+});
+
+test('validateAdapter: a malformed assume_zone or normalizer is rejected with a clear message', () => {
+  for (const [rule, message] of INVALID_RULES) {
+    const result = validateAdapter(withRule(rule));
+    assert.equal(result.ok, false, JSON.stringify(rule));
+    assert.ok(result.errors.some((e) => e.includes(message)), `${JSON.stringify(rule)}: ${JSON.stringify(result.errors)}`);
+  }
+});
+
+test('schema: agrees with validateAdapter on iso-datetime and assume_zone', () => {
+  for (const rule of VALID_RULES) {
+    assert.equal(validateSchema(withRule(rule)), true, JSON.stringify(validateSchema.errors));
+  }
+  for (const [rule] of INVALID_RULES) {
+    assert.equal(validateSchema(withRule(rule)), false, JSON.stringify(rule));
+  }
+});
+
+test('schema: the normalize enum lists exactly the normalizers validateAdapter accepts', () => {
+  const names = [...schema.$defs.map_rule.properties.normalize.enum].sort();
+  assert.deepEqual(names, ['bool', 'iso-date', 'iso-datetime', 'number', 'text']);
+  for (const name of names) {
+    assert.equal(validateAdapter(withRule({ path: 'p', normalize: name })).ok, true, name);
   }
 });

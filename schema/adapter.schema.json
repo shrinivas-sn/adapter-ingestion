@@ -316,9 +316,27 @@
             "text",
             "number",
             "iso-date",
+            "iso-datetime",
             "bool"
           ],
-          "description": "Optional value cleaning."
+          "description": "Optional value cleaning. iso-datetime (since 0.7) keeps the time and returns UTC YYYY-MM-DDTHH:mm:ss.sssZ."
+        },
+        "assume_zone": {
+          "const": "Z",
+          "description": "Since 0.7, with normalize iso-datetime only: read a time that has no zone as UTC. A value with its own zone keeps it."
+        }
+      },
+      "dependentSchemas": {
+        "assume_zone": {
+          "type": "object",
+          "required": [
+            "normalize"
+          ],
+          "properties": {
+            "normalize": {
+              "const": "iso-datetime"
+            }
+          }
         }
       }
     },

@@ -1,7 +1,7 @@
 import { isValidDateOnly } from './normalize.mjs';
 import { builtinKindNames, resolveKind } from './kinds/index.mjs';
 
-const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'bool']);
+const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'iso-datetime', 'bool']);
 const MANDATORY_MAP_KEYS = ['source_id', 'url'];
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 const RESERVED_HOST_BASENAME = /^(CON|NUL|AUX|PRN|COM[1-9]|LPT[1-9])$/i;
@@ -20,7 +20,7 @@ const KNOWN_FETCH_KEYS = new Set([
 const KNOWN_PAGINATION_KEYS = new Set(['style', 'param', 'max_pages', 'per_page', 'per_page_param', 'allow_truncation']);
 const KNOWN_INCREMENTAL_KEYS = new Set(['param', 'type']);
 const KNOWN_RETRY_KEYS = new Set(['max_attempts', 'backoff_ms', 'max_delay_ms']);
-const KNOWN_MAP_RULE_KEYS = new Set(['path', 'normalize']);
+const KNOWN_MAP_RULE_KEYS = new Set(['path', 'normalize', 'assume_zone']);
 // A fetch.headers value may be { env, optional? }: the value is read from
 // that environment variable at run time (src/fetch/headers.mjs), never here.
 const KNOWN_HEADER_REF_KEYS = new Set(['env', 'optional']);
@@ -266,6 +266,10 @@ function validateMap(adapter, need) {
     }
     if (rule.normalize !== undefined) {
       need(KNOWN_NORMALIZERS.has(rule.normalize), `map.${name}: unknown normalizer "${rule.normalize}"`);
+    }
+    if (rule.assume_zone !== undefined) {
+      need(rule.assume_zone === 'Z', `map.${name}.assume_zone must be "Z" (UTC)`);
+      need(rule.normalize === 'iso-datetime', `map.${name}.assume_zone needs "normalize": "iso-datetime"`);
     }
   }
 }
