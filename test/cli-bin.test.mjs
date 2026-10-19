@@ -270,3 +270,41 @@ test('bin doctor --check-updates: an unreachable registry is "unavailable", exit
   assert.equal(code, 0);
   assert.deepEqual(JSON.parse(stdout).update, { status: 'unavailable', current: JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version, latest: null });
 });
+
+async function editAdapter(cwd, edit) {
+  const file = join(cwd, 'adapter.json');
+  const adapter = JSON.parse(await readFile(file, 'utf8'));
+  edit(adapter);
+  await writeFile(file, JSON.stringify(adapter));
+}
+
+test('bin doctor: a misspelled canary is advised; ok and exit code unchanged', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  await editAdapter(cwd, (a) => { a.canry = { min_records: 1 }; });
+  const { code, stdout } = await runBin(['doctor', 'adapter.json', '--json'], { cwd });
+  assert.equal(code, 0);
+  const out = JSON.parse(stdout);
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.notices.map((n) => n.code), ['A_CANARY_NO_HISTORY', 'A_TOP_LEVEL_KEY_TYPO']);
+});
+
+test('bin run: the typo notice prints on stderr; exit code unchanged', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  await editAdapter(cwd, (a) => { a.canry = { min_records: 1 }; });
+  const { code, stderr } = await runBin(['run', 'adapter.json'], { cwd });
+  assert.equal(code, 0);
+  assert.ok(stderr.includes('notice A_TOP_LEVEL_KEY_TYPO: "canry" is not an adapter key'), stderr);
+});
+
+test('bin doctor: an invalid adapter with a typo still has empty notices', async (t) => {
+  const cwd = await disposableCwd(t);
+  await loopbackAdapter(t, cwd);
+  await editAdapter(cwd, (a) => { a.record_path = 'x'; delete a.map; });
+  const { code, stdout } = await runBin(['doctor', 'adapter.json', '--json'], { cwd });
+  assert.equal(code, 2);
+  const out = JSON.parse(stdout);
+  assert.equal(out.ok, false);
+  assert.deepEqual(out.notices, []);
+});
