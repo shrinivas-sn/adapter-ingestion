@@ -1,10 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { applyNormalizer } from '../src/normalize.mjs';
 import { validateAdapter } from '../src/adapter.mjs';
+import { runIngest } from '../src/run.mjs';
+import { readRecords } from '../src/store.mjs';
 
 // iso-datetime (since 0.7): keeps the time of day and returns UTC in one
 // fixed shape. Formats below are taken from real sources (GitHub REST
@@ -131,4 +135,56 @@ test('schema: the normalize enum lists exactly the normalizers validateAdapter a
   for (const name of names) {
     assert.equal(validateAdapter(withRule({ path: 'p', normalize: name })).ok, true, name);
   }
+});
+
+// --- A real run: extraction passes the map rule, staleness accepts the output ---
+
+const runAdapter = (atRule, canary = {}) => ({
+  version: 1, host: 'example.test',
+  access: { tier: 1, kind: 'json-api', url: 'https://example.test/api' },
+  fetch: { method: 'GET', retry: { max_attempts: 1 } },
+  records_path: '$',
+  map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' }, at: atRule },
+  required: ['source_id', 'url', 'title'],
+  canary: { min_records: 1, median_window: 5, count_drop_ratio: 0.4, required_field_ratio: 0.9, ...canary },
+});
+const item = (id, at) => ({ id, link: `https://example.test/${id}`, title: `Item ${id}`, at });
+const respond = (body) => async () => new Response(JSON.stringify(body), { status: 200 });
+
+async function runOnce(t, adapter, items, now = new Date()) {
+  const dir = await mkdtemp(join(tmpdir(), 'iso-datetime-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const paths = { storeFile: join(dir, 'store.jsonl'), runsDir: join(dir, 'runs') };
+  const result = await runIngest({ adapter, paths, fetchImpl: respond(items), now });
+  const stored = (await readRecords(paths.storeFile)).map((r) => r.fields.at);
+  return { ...result, stored };
+}
+
+test('run: iso-datetime values are stored in UTC', async (t) => {
+  const items = [item(1, '2026-10-19T15:23:15Z'), item(2, '2026-10-19T20:53:15+05:30')];
+  const { stored } = await runOnce(t, runAdapter({ path: 'at', normalize: 'iso-datetime' }), items);
+  assert.deepEqual(stored, ['2026-10-19T15:23:15.000Z', '2026-10-19T15:23:15.000Z']);
+});
+
+test('run: assume_zone reaches the normalizer; without it a zone-less time is null', async (t) => {
+  const items = [item(1, '2026-10-06T17:00:00')];
+  const withZone = await runOnce(t, runAdapter({ path: 'at', normalize: 'iso-datetime', assume_zone: 'Z' }), items);
+  assert.deepEqual(withZone.stored, ['2026-10-06T17:00:00.000Z']);
+  const without = await runOnce(t, runAdapter({ path: 'at', normalize: 'iso-datetime' }), items);
+  assert.deepEqual(without.stored, [null]);
+});
+
+test('run: the staleness check accepts iso-datetime output', async (t) => {
+  const now = new Date('2026-10-19T12:00:00Z');
+  const adapter = runAdapter({ path: 'at', normalize: 'iso-datetime' }, { max_staleness_days: 1, staleness_field: 'at' });
+  const fresh = await runOnce(t, adapter, [item(1, new Date(now.getTime() - 2 * 3600_000).toISOString())], now);
+  assert.equal(fresh.canary.status, 'ok', JSON.stringify(fresh.canary));
+  const old = await runOnce(t, adapter, [item(1, new Date(now.getTime() - 3 * 86400_000).toISOString())], now);
+  assert.equal(old.canary.status, 'stale');
+  assert.ok(old.canary.breaches.some((b) => b.startsWith('staleness:')), JSON.stringify(old.canary.breaches));
+});
+
+test('run: iso-date output is unchanged', async (t) => {
+  const { stored } = await runOnce(t, runAdapter({ path: 'at', normalize: 'iso-date' }), [item(1, '2026-10-19T20:53:15+05:30')]);
+  assert.deepEqual(stored, ['2026-10-19']);
 });
