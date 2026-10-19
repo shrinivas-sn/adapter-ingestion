@@ -459,11 +459,13 @@ history only from it. A run that fails validation or cannot take the lock adds n
   request and the body download; `max_duration_ms` is checked again once parsing returns.
   A pathological page (thousands of nested elements) can still take seconds to parse, so
   keep `max_response_bytes` small for sources you don't trust.
-- **The canary's `count_drop_ratio` check needs earlier run reports.** It compares this
-  run with the median of recent reports in `paths.runsDir`. A CI runner that starts from a
-  fresh checkout every time has no history, so this check silently never fires. Persist
-  `runsDir` between runs (a CI cache, or a few committed reports) if you rely on it.
-  `min_records`, `required_field_ratio` and `staleness` need no history.
+- **The canary's `count_drop_ratio` check needs past runs.** It compares this run with the
+  median of recent runs, read from `paths.runsDir` unless `paths.historyFile` is set. A CI
+  runner that starts from a fresh checkout every time has no `runs/`, so this check never
+  fires and every report carries `A_CANARY_NO_HISTORY`. Set `paths.historyFile` (CLI:
+  `--history`) to a file you commit next to the store (see
+  [Canary history on CI](#canary-history-on-ci)). `min_records`, `required_field_ratio` and
+  `staleness` need no history.
 - **A UA-only bot gate shows up as a 403 with a default agent, 200 with a browser UA** —
   probe both when writing a new adapter.
 - **Redirects are not followed.** A 301 or 302 fails as `E_REDIRECT`. Put the final URL in
