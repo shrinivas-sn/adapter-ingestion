@@ -25,6 +25,7 @@ const KNOWN_CANARY_KEYS = new Set([
   'min_records', 'median_window', 'count_drop_ratio', 'required_field_ratio',
   'max_staleness_days', 'staleness_field',
 ]);
+const KNOWN_TOP_LEVEL_KEYS = new Set(['$schema', 'version', 'host', 'access', 'fetch', 'records_path', 'map', 'required', 'canary', 'html']);
 
 // The known keys of every adapter section, for the JSON Schema drift test
 // (test/schema.test.mjs). Not a package subpath: internal, like this module.
@@ -36,6 +37,7 @@ export const KNOWN_KEYS = Object.freeze({
   retry: [...KNOWN_RETRY_KEYS].sort(),
   map_rule: [...KNOWN_MAP_RULE_KEYS].sort(),
   canary: [...KNOWN_CANARY_KEYS].sort(),
+  top_level: [...KNOWN_TOP_LEVEL_KEYS].sort(),
 });
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)

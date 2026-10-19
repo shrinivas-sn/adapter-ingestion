@@ -83,3 +83,7 @@ test('schema drift: each section lists exactly the keys the engine knows', () =>
   assert.deepEqual(props('html_script_json'), HTML_KNOWN_KEYS.script_json);
   assert.deepEqual(props('html_field'), HTML_KNOWN_KEYS.field);
 });
+
+test('schema drift: top-level keys match KNOWN_KEYS.top_level', () => {
+  assert.deepEqual(Object.keys(schema.properties).sort(), KNOWN_KEYS.top_level);
+});
