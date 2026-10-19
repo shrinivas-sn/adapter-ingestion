@@ -1,12 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateAdapter } from '../src/adapter.mjs';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { KNOWN_KEYS } from '../src/config.mjs';
 import { resolveHeaders } from '../src/fetch/headers.mjs';
 import { fetchAll } from '../src/fetch.mjs';
 import { jsonResponse } from './helpers/fixtures.mjs';
+import { computeAdapterFingerprint } from '../src/fingerprint.mjs';
+import { runBin, disposableCwd } from './helpers/bin.mjs';
+import { startServer } from './helpers/http-server.mjs';
 
 const base = {
   version: 1, host: 'example.test',
@@ -157,4 +164,96 @@ test('secret headers: fetchAll makes no request and does not retry when a requir
     (err) => err.code === 'E_HEADER_ENV',
   );
   assert.equal(calls, 0);
+});
+
+// ---- end to end: run reports and the CLI -----------------------------------
+
+async function headerServer(t) {
+  const seen = [];
+  const { origin, close } = await startServer({
+    '/data': (req, res) => {
+      seen.push(req.headers.authorization);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([{ id: 1, link: 'https://example.test/1', title: 'One' }]));
+    },
+  });
+  t.after(close);
+  return { origin, seen };
+}
+
+async function writeRefAdapter(cwd, origin, ref) {
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { headers: { Authorization: ref }, retry: { max_attempts: 1 } },
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  await writeFile(join(cwd, 'adapter.json'), JSON.stringify(adapter));
+  return adapter;
+}
+
+async function allFileText(dir) {
+  const files = await readdir(dir, { recursive: true, withFileTypes: true });
+  const texts = await Promise.all(files.filter((f) => f.isFile())
+    .map((f) => readFile(join(f.parentPath ?? f.path, f.name), 'utf8')));
+  return texts.join('\n');
+}
+
+test('secret headers: bin run sends the secret, and it reaches no file and no output', async (t) => {
+  const cwd = await disposableCwd(t);
+  const { origin, seen } = await headerServer(t);
+  await writeRefAdapter(cwd, origin, { env: 'ADAPTER_TEST_TOKEN_1' });
+  const { code, stdout, stderr } = await runBin(['run', 'adapter.json', '--json', '--history', 'h.jsonl'],
+    { cwd, env: { ADAPTER_TEST_TOKEN_1: 'SECRET-abc123' } });
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(seen, ['SECRET-abc123']);
+  const onDisk = await allFileText(cwd);
+  assert.ok(onDisk.includes('ADAPTER_TEST_TOKEN_1'), 'the adapter file is read');
+  for (const text of [onDisk, stdout, stderr]) assert.ok(!text.includes('abc123'));
+});
+
+test('secret headers: bin run with the variable unset exits 2 with E_HEADER_ENV and sends nothing', async (t) => {
+  const cwd = await disposableCwd(t);
+  const { origin, seen } = await headerServer(t);
+  await writeRefAdapter(cwd, origin, { env: 'ADAPTER_TEST_TOKEN_1' });
+  const { code, stdout } = await runBin(['run', 'adapter.json', '--json'], { cwd, env: { ADAPTER_TEST_TOKEN_1: '' } });
+  assert.equal(code, 2);
+  assert.equal(JSON.parse(stdout).failure.code, 'E_HEADER_ENV');
+  assert.equal(seen.length, 0);
+  const runsDir = join(cwd, 'runs', '127.0.0.1');
+  const reports = (await readdir(runsDir)).filter((f) => f.startsWith('report-')).sort();
+  const report = JSON.parse(await readFile(join(runsDir, reports.at(-1)), 'utf8'));
+  assert.equal(report.outcome, 'error');
+  assert.equal(report.failure.code, 'E_HEADER_ENV');
+});
+
+test('secret headers: bin run with an optional variable unset sends no header and exits 0', async (t) => {
+  const cwd = await disposableCwd(t);
+  const { origin, seen } = await headerServer(t);
+  await writeRefAdapter(cwd, origin, { env: 'ADAPTER_TEST_TOKEN_1', optional: true });
+  const { code, stderr } = await runBin(['run', 'adapter.json', '--json'], { cwd, env: { ADAPTER_TEST_TOKEN_1: '' } });
+  assert.equal(code, 0, stderr);
+  assert.deepEqual(seen, [undefined]);
+});
+
+test('secret headers: the fingerprint does not depend on the secret value', (t) => {
+  const v = envVar(t, 'one');
+  const adapter = { ...base, fetch: { headers: { Authorization: { env: v } } } };
+  const first = computeAdapterFingerprint(adapter);
+  process.env[v] = 'two';
+  assert.equal(computeAdapterFingerprint(adapter), first);
+});
+
+test('secret headers: the older node src/run.mjs entry point also exits 2 for E_HEADER_ENV', async (t) => {
+  const cwd = await disposableCwd(t);
+  const { origin, seen } = await headerServer(t);
+  await writeRefAdapter(cwd, origin, { env: 'ADAPTER_TEST_TOKEN_1' });
+  const runMjs = fileURLToPath(new URL('../src/run.mjs', import.meta.url));
+  const child = spawn(process.execPath, [runMjs, 'adapter.json'], {
+    cwd, env: { ...process.env, ADAPTER_TEST_TOKEN_1: '' }, stdio: 'ignore',
+  });
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 2);
+  assert.equal(seen.length, 0);
 });

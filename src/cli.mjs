@@ -21,7 +21,7 @@ import { CODES } from './codes.mjs';
 const EXIT_OK = 0;
 const EXIT_OPERATIONAL = 1;
 const EXIT_CONFIG = 2;
-const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID']);
+const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID', 'E_HEADER_ENV']);
 
 const USAGE = `usage: adapter-ingestion <command> [options]
 
