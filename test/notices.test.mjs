@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { collectNotices, RULES, NOTICE_LIMIT } from '../src/notices.mjs';
+import { readFile, readdir } from 'node:fs/promises';
 
 const adapter = {
   version: 1, host: 'example.test',
@@ -72,5 +73,105 @@ test('notices: shipped rule messages never embed a URL, header or value', () => 
     for (const n of rule.check(adapter, { mode: 'snapshot', historyCount: 0, usesHistoryFile: false })) {
       assert.doesNotMatch(n.message, /https?:|example\.test/);
     }
+  }
+});
+
+const TYPO = 'A_TOP_LEVEL_KEY_TYPO';
+const typoNotices = (a) => collectNotices(a, null).filter((n) => n.code === TYPO);
+
+test('notices: A_TOP_LEVEL_KEY_TYPO suggests the setting a near-miss meant', () => {
+  const table = {
+    records_path: ['record_path', 'recordsPath', 'RecordsPath', 'Records_Path', 'records-path',
+      'records__path', 'recordspath', 'records path', 'record-path', 'recordPath'],
+    required: ['requried', 'require', 'Required', 'REQUIRED', 'requird', 'reqired'],
+    canary: ['canry', 'Canary', 'CANARY', 'canery', 'cnary'],
+    fetch: ['fecth', 'fetchs', 'Fetch', 'fetc'],
+  };
+  for (const [expected, typos] of Object.entries(table)) {
+    for (const typo of typos) {
+      const notices = collectNotices({ ...adapter, [typo]: 1 }, null);
+      assert.equal(notices.length, 1, typo);
+      assert.equal(notices[0].code, TYPO, typo);
+      assert.equal(notices[0].kind, 'advice', typo);
+      assert.equal(notices[0].since, '0.5.0', typo);
+      assert.equal(notices[0].path, typo, typo);
+      assert.ok(notices[0].message.includes(`Did you mean "${expected}"`), `${typo}: ${notices[0].message}`);
+    }
+  }
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO message is pinned', () => {
+  assert.deepEqual(typoNotices({ ...adapter, record_path: 'results' }), [{
+    code: TYPO,
+    kind: 'advice',
+    message: '"record_path" is not an adapter key, so it is ignored. Did you mean "records_path"? If it is your own note, start its name with "_".',
+    since: '0.5.0',
+    docs: 'https://github.com/shrinivas-sn/adapter-ingestion/blob/main/README.md#writing-an-adapter-by-hand',
+    path: 'record_path',
+  }]);
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO stays quiet on metadata keys', () => {
+  const quiet = ['fixtures', 'generated_at', 'generator_model', 'verified_against_fixtures', 'notes',
+    'description', 'owner', 'comment', 'tags', 'source', 'license', 'id', 'title', 'docs', 'url',
+    'author', 'schedule', 'cron', 'enabled', 'label', 'kind', 'status', 'path', 'mode', 'meta',
+    'metadata', '$id', '$comment', 'schema', 'records', 'record', 'fields', 'filter', 'cost', 'post',
+    'hosts', 'versions', 'maps', 'HTML', 'htm', 'fetched', 'fetcher', 'fetched_at', 'fetches',
+    'canal', 'canaries', 'requirement', 'requirements', 'required_by', 'acquired', 'retired',
+    'records_note', 'record_count', 'records_url', 'retry', 'request', 'timeout'];
+  for (const key of quiet) assert.deepEqual(typoNotices({ ...adapter, [key]: 1 }), [], key);
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO accepted near-misses are silenced by "_"', () => {
+  assert.ok(typoNotices({ ...adapter, canard: 1 })[0].message.includes('Did you mean "canary"'));
+  assert.ok(typoNotices({ ...adapter, requires: 1 })[0].message.includes('Did you mean "required"'));
+  for (const key of ['_canard', '_requires', '_canary', '_record_path']) {
+    assert.deepEqual(typoNotices({ ...adapter, [key]: 1 }), [], key);
+  }
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO skips a setting that is already set', () => {
+  assert.deepEqual(typoNotices({ ...adapter, records_path: '$', record_path: 'x' }), []);
+  assert.deepEqual(typoNotices({ ...adapter, required: ['url'], requried: [] }), []);
+  assert.equal(typoNotices({ ...adapter, records_path: null, record_path: 'x' }).length, 1);
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO tolerates any adapter value', () => {
+  for (const value of [null, [], 'x', 42]) {
+    assert.deepEqual(typoNotices(value), [], JSON.stringify(value));
+  }
+  assert.deepEqual(typoNotices(JSON.parse('{"__proto__": {}, "_notes": "x"}')), []);
+  assert.deepEqual(typoNotices({ ...adapter, ['r'.repeat(10000)]: 1 }), []);
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO caps its own hits at 10', () => {
+  const keys = ['record_path', 'Record_Path', 'RECORD_PATH', 'recordsPath', 'RecordsPath',
+    'records-path', 'records__path', 'Records_Path', 'requried', 'Required', 'REQUIRED',
+    'canry', 'Canary', 'CANARY', 'fecth'];
+  const a = { ...adapter };
+  for (const key of keys) a[key] = 1;
+  assert.equal(typoNotices(a).length, 10);
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO messages are printable ASCII and value-free', () => {
+  const lookalike = 'rеcords_path';
+  const [cyrillic] = typoNotices({ ...adapter, [lookalike]: 1 });
+  assert.ok(cyrillic.message.includes('r\\u0435cords_path'), cyrillic.message);
+  assert.match(cyrillic.message, /^[\x20-\x7e]+$/);
+  assert.equal(cyrillic.path, lookalike);
+  const [newline] = typoNotices({ ...adapter, 'record_path\n': 1 });
+  assert.match(newline.message, /^[\x20-\x7e]+$/);
+  const [secret] = typoNotices({ ...adapter, record_path: 'https://example.test/secret' });
+  assert.doesNotMatch(secret.message, /https?:/);
+  assert.doesNotMatch(secret.message, /example\.test/);
+});
+
+test('notices: A_TOP_LEVEL_KEY_TYPO is quiet for every repo adapter', async () => {
+  const dir = new URL('../adapters/', import.meta.url);
+  const files = (await readdir(dir)).filter((f) => f.endsWith('.adapter.json'));
+  assert.ok(files.length > 0);
+  for (const f of files) {
+    const a = JSON.parse(await readFile(new URL(f, dir), 'utf8'));
+    assert.deepEqual(typoNotices(a), [], f);
   }
 });

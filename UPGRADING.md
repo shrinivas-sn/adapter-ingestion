@@ -28,6 +28,28 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.4 → 0.5
+
+### Free with no changes
+
+- New advice notice `A_TOP_LEVEL_KEY_TYPO`. A top-level key one edit away from `fetch`,
+  `records_path`, `required` or `canary` (such as `record_path` or `canry`) used to be
+  ignored without a word. `doctor` and every run report of a valid adapter now name it and
+  the key it probably meant. Like every notice, it never changes `outcome` or an exit code;
+  in text mode it prints on stderr.
+- Fixing a flagged key turns that setting on, so the next run can differ (for example,
+  `required` starts rejecting records that miss a field). The adapter fingerprint also
+  changes, so `count_drop_ratio` starts a new history.
+
+### Opt in
+
+- Start your own top-level metadata keys with `_` (`_notes`): they are never flagged, and no
+  release will give them a meaning.
+
+### Action needed
+
+- None.
+
 ## 0.3 → 0.4
 
 ### Free with no changes

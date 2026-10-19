@@ -63,3 +63,32 @@ test('notices in runs: a fatal run after validation carries adapter-only notices
     return true;
   });
 });
+
+test('notices in runs: a valid run with a misspelled canary advises it, outcome still ok', async (t) => {
+  const plain = await runIngest({ adapter, paths: await tmpPaths(t), fetchImpl: impl(items) });
+  const typo = { ...adapter, canry: { min_records: 1 } };
+  const { report } = await runIngest({ adapter: typo, paths: await tmpPaths(t), fetchImpl: impl(items) });
+  assert.equal(report.outcome, 'ok');
+  assert.equal(report.stages.written, plain.report.stages.written);
+  assert.deepEqual(report.notices.map((n) => n.code), ['A_CANARY_NO_HISTORY', 'A_TOP_LEVEL_KEY_TYPO']);
+});
+
+test('notices in runs: a misspelled records_path fails with its hint attached', async (t) => {
+  const paths = await tmpPaths(t);
+  const typo = { ...adapter, record_path: 'results' };
+  await assert.rejects(runIngest({ adapter: typo, paths, fetchImpl: impl({ results: items }) }), (err) => {
+    assert.equal(err.report.failure.code, 'E_RESPONSE_SHAPE');
+    assert.ok(err.report.notices.some((n) => n.code === 'A_TOP_LEVEL_KEY_TYPO' && n.path === 'record_path'));
+    return true;
+  });
+});
+
+test('notices in runs: an invalid adapter still gets no notices, even with a typo', async (t) => {
+  const paths = await tmpPaths(t);
+  const { map, ...noMap } = adapter;
+  await assert.rejects(runIngest({ adapter: { ...noMap, record_path: 'x' }, paths, fetchImpl: impl(items) }), (err) => {
+    assert.equal(err.report.failure.code, 'E_ADAPTER_INVALID');
+    assert.deepEqual(err.report.notices, []);
+    return true;
+  });
+});

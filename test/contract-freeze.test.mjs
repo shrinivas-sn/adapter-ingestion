@@ -46,7 +46,7 @@ const REPORT_KEYS = [
 ];
 
 // A_* advice and D_* deprecation notice codes (src/notices.mjs).
-const NOTICE_CODES = ['A_CANARY_NO_HISTORY'];
+const NOTICE_CODES = ['A_CANARY_NO_HISTORY', 'A_TOP_LEVEL_KEY_TYPO'];
 
 const RECORD_KEYS = ['content_hash', 'fetched_at', 'fields', 'id', 'raw', 'source_host', 'source_url'];
 
