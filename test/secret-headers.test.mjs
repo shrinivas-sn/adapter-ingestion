@@ -4,6 +4,9 @@ import { validateAdapter } from '../src/adapter.mjs';
 import { readFile } from 'node:fs/promises';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { KNOWN_KEYS } from '../src/config.mjs';
+import { resolveHeaders } from '../src/fetch/headers.mjs';
+import { fetchAll } from '../src/fetch.mjs';
+import { jsonResponse } from './helpers/fixtures.mjs';
 
 const base = {
   version: 1, host: 'example.test',
@@ -79,3 +82,79 @@ for (const headers of [{ A: { env: '1BAD' } }, { A: { env: 'X', secret: true } }
     assert.equal(validateAdapter(withHeaders(headers)).ok, false, 'validateAdapter should reject');
   });
 }
+
+// ---- run-time resolution ----------------------------------------------------
+
+// Unique names, deleted after each test, so nothing leaks between tests.
+let envCounter = 0;
+function envVar(t, value) {
+  const name = `ADAPTER_TEST_TOKEN_${process.pid}_${++envCounter}`;
+  if (value !== undefined) process.env[name] = value;
+  t.after(() => { delete process.env[name]; });
+  return name;
+}
+
+test('secret headers: resolveHeaders copies strings in order and reads references', (t) => {
+  const v = envVar(t, 'Bearer abc');
+  const out = resolveHeaders({ 'User-Agent': 'ua', Authorization: { env: v }, Accept: 'x' });
+  assert.deepEqual(Object.entries(out), [['User-Agent', 'ua'], ['Authorization', 'Bearer abc'], ['Accept', 'x']]);
+  assert.equal(Object.getPrototypeOf(out), Object.prototype);
+});
+
+test('secret headers: resolveHeaders of undefined is {}', () => {
+  assert.deepEqual(resolveHeaders(undefined), {});
+});
+
+test('secret headers: an optional reference that is unset or empty is left out', (t) => {
+  const unset = envVar(t);
+  const empty = envVar(t, '');
+  assert.deepEqual(resolveHeaders({ A: { env: unset, optional: true }, B: { env: empty, optional: true }, C: 'c' }), { C: 'c' });
+});
+
+for (const value of [undefined, '']) {
+  test(`secret headers: a required reference that is ${value === undefined ? 'unset' : 'empty'} throws E_HEADER_ENV`, (t) => {
+    const v = envVar(t, value);
+    assert.throws(() => resolveHeaders({ Authorization: { env: v } }), (err) => {
+      assert.equal(err.code, 'E_HEADER_ENV');
+      assert.ok(err.message.includes('fetch.headers.Authorization') && err.message.includes(v), err.message);
+      assert.deepEqual(err.details, { header: 'Authorization', env: v });
+      return true;
+    });
+  });
+}
+
+test('secret headers: an invalid value throws E_HEADER_ENV without the value anywhere', (t) => {
+  const v = envVar(t, 'tok\nen-SECRET123');
+  assert.throws(() => resolveHeaders({ Authorization: { env: v } }), (err) => {
+    assert.equal(err.code, 'E_HEADER_ENV');
+    assert.equal(err.cause, undefined);
+    assert.ok(!err.message.includes('SECRET123'), err.message);
+    assert.ok(!JSON.stringify(err.details).includes('SECRET123'));
+    return true;
+  });
+});
+
+const fetchAdapter = (headers, extra = {}) => ({
+  host: 'example.test', records_path: '$',
+  access: { kind: 'json-api', url: 'https://example.test/api' },
+  fetch: { headers, ...extra },
+});
+
+test('secret headers: fetchAll sends the resolved value as a plain object', async (t) => {
+  const v = envVar(t, 'Bearer xyz');
+  const seen = [];
+  const impl = async (url, init) => { seen.push(init.headers); return jsonResponse([]); };
+  await fetchAll(fetchAdapter({ 'User-Agent': 'ua', Authorization: { env: v } }), { fetchImpl: impl });
+  assert.deepEqual(seen, [{ 'User-Agent': 'ua', Authorization: 'Bearer xyz' }]);
+});
+
+test('secret headers: fetchAll makes no request and does not retry when a required variable is unset', async (t) => {
+  const v = envVar(t);
+  let calls = 0;
+  const impl = async () => { calls++; return jsonResponse([]); };
+  await assert.rejects(
+    fetchAll(fetchAdapter({ Authorization: { env: v } }, { retry: { max_attempts: 3 } }), { fetchImpl: impl }),
+    (err) => err.code === 'E_HEADER_ENV',
+  );
+  assert.equal(calls, 0);
+});

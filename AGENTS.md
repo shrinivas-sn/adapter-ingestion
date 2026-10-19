@@ -144,6 +144,7 @@ Every `E_*` error, `A_*` advice and `D_*` deprecation code. For details:
 | `E_FETCH` | error | The request failed before a response arrived. | Check the URL and network access. Connection failures are retried when fetch.retry allows it. |
 | `E_FETCH_DEADLINE` | error | The whole fetch took longer than fetch.max_duration_ms. | Raise fetch.max_duration_ms, lower max_pages, or reduce retry delays. |
 | `E_FILTER_INVALID` | error | A filter definition failed validation. | Fix the filter JSON; the message lists each problem. |
+| `E_HEADER_ENV` | error | A fetch header reads an environment variable that is unset, empty, or not a valid header value. | Set the variable where the run happens (in CI, as a secret). Mark the header "optional": true to send no header when it is unset. |
 | `E_HTTP_STATUS` | error | The server answered with a status that is not a success. | Open the URL by hand. 429 and 5xx are retried when fetch.retry allows it; other statuses need an adapter change. |
 | `E_KIND_DEPENDENCY` | error | A source kind needs an optional package that is not installed. | Install it next to this package: `npm install cheerio`. |
 | `E_LOCK_RELEASE` | error | The run finished but its store lock file could not be removed. | Check the store directory, then remove the leftover `.lock` file once no run is active. |

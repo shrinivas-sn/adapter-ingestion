@@ -37,7 +37,7 @@ function isRetryableError(err) {
 // place: fetchAll's diagnostics and every fetchContext() snapshot must see
 // attempts made here exactly as they did when this loop lived inline.
 export async function requestPage({
-  url, adapter, fetchImpl, signal, timeoutMs, maxResponseBytes, budget,
+  url, adapter, headers, fetchImpl, signal, timeoutMs, maxResponseBytes, budget,
   retry: { maxAttempts, backoffMs, maxRetryDelayMs },
   deadline: { startedAt, maxDurationMs },
   fetchContext, counters, statuses,
@@ -54,7 +54,8 @@ export async function requestPage({
     try {
       res = await fetchImpl(url, {
         method: adapter.fetch?.method ?? 'GET',
-        headers: adapter.fetch?.headers ?? {},
+        // Resolved once by fetchAll (src/fetch/headers.mjs); may hold secrets.
+        headers,
         redirect: 'error',
         signal: attemptSignal,
       });

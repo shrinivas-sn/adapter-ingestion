@@ -3,6 +3,7 @@ import { getPath } from './extract.mjs';
 import { waitFor } from './http.mjs';
 import { IngestionError } from './errors.mjs';
 import { requestPage } from './fetch/request.mjs';
+import { resolveHeaders } from './fetch/headers.mjs';
 import { resolveKind, validateKindsOption, BUILTIN_KINDS } from './kinds/index.mjs';
 
 /**
@@ -36,6 +37,8 @@ function digestBatch(batch) {
  */
 export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds } = {}) {
   validateKindsOption(kinds);
+  // Before any request: an unset secret fails the run with nothing sent.
+  const headers = resolveHeaders(adapter.fetch?.headers);
   const p = adapter.fetch?.pagination;
   const hasPagination = p !== undefined;
   const maxPages = p?.max_pages ?? 1;
@@ -88,7 +91,7 @@ export async function fetchAll(adapter, { since, fetchImpl = fetch, signal, kind
     const url = buildUrl(adapter, { page, since });
 
     const { buffer, contentType } = await requestPage({
-      url, adapter, fetchImpl, signal, timeoutMs, maxResponseBytes, budget,
+      url, adapter, headers, fetchImpl, signal, timeoutMs, maxResponseBytes, budget,
       retry: { maxAttempts, backoffMs, maxRetryDelayMs },
       deadline: { startedAt, maxDurationMs },
       fetchContext, counters, statuses,
