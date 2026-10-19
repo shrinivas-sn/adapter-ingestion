@@ -205,11 +205,14 @@ const NORMALIZERS = { text, number, 'iso-date': isoDate, 'iso-datetime': isoDate
  * @param {{ assume_zone?: 'Z' }} [options] a map rule; only assume_zone is read
  * @returns {any}
  */
-export function applyNormalizer(name, value, options = {}) {
+export function applyNormalizer(name, value, options) {
   const fn = NORMALIZERS[name];
   if (!fn) throw new Error(`unknown normalizer: ${name}`);
-  if (options.assume_zone !== undefined && options.assume_zone !== 'Z') {
+  const opts = options ?? {};
+  // Checked only where it has a meaning: extractAll passes the whole map
+  // rule, and before 0.7 every other normalizer ignored extra rule keys.
+  if (name === 'iso-datetime' && opts.assume_zone !== undefined && opts.assume_zone !== 'Z') {
     throw new Error('assume_zone must be "Z"');
   }
-  return fn(value, options);
+  return fn(value, opts);
 }

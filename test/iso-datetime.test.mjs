@@ -188,3 +188,16 @@ test('run: iso-date output is unchanged', async (t) => {
   const { stored } = await runOnce(t, runAdapter({ path: 'at', normalize: 'iso-date' }), [item(1, '2026-10-19T20:53:15+05:30')]);
   assert.deepEqual(stored, ['2026-10-19']);
 });
+
+// --- Review fixes: the public API keeps 0.6 behaviour for every other call ---
+
+test('applyNormalizer: null options behave like no options', () => {
+  assert.equal(applyNormalizer('iso-datetime', '2026-10-19T15:23:15Z', null), '2026-10-19T15:23:15.000Z');
+  assert.equal(applyNormalizer('text', ' a ', null), 'a');
+});
+
+test('applyNormalizer: assume_zone is checked only for iso-datetime (other normalizers ignore it as in 0.6)', () => {
+  assert.equal(applyNormalizer('text', ' a ', { assume_zone: 'UTC' }), 'a');
+  assert.equal(applyNormalizer('iso-date', '2026-10-19', { assume_zone: 'UTC' }), '2026-10-19');
+  assert.throws(() => applyNormalizer('iso-datetime', 'x', { assume_zone: 'UTC' }), /assume_zone must be "Z"/);
+});
