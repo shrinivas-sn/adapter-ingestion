@@ -28,6 +28,25 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.6 → 0.7
+
+### Free with no changes
+
+- Nothing changes for existing adapters; `iso-date` output is the same.
+
+### Opt in
+
+- `"normalize": "iso-datetime"` keeps the time and returns UTC
+  (`2026-10-19T15:23:15.000Z`). Switching an existing field changes its stored value, so
+  every record shows as changed once, and the fingerprint changes (`count_drop_ratio`
+  starts a new history).
+- `"assume_zone": "Z"` on an `iso-datetime` rule reads a time with no zone as UTC. Use it
+  only when the source documents UTC (WordPress `date_gmt`).
+
+### Action needed
+
+- None.
+
 ## 0.5 → 0.6
 
 ### Free with no changes

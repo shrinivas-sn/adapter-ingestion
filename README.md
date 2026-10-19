@@ -259,7 +259,7 @@ The package itself is still plain JavaScript with no runtime dependencies.
   numeric segment indexes an array). Never traverses the prototype chain.
 
 **`/normalize`**
-- `applyNormalizer(name, value)` — `name` is one of `text`, `number`, `iso-date`, `bool`.
+- `applyNormalizer(name, value, options?)` — `name` is one of `text`, `number`, `iso-date`, `iso-datetime`, `bool`; `options.assume_zone` may be `"Z"`.
 - `isValidDateOnly(value)`.
 
 **`/dedupe`**
@@ -275,7 +275,7 @@ that ships with the package (since 0.4). Either the installed copy, which works 
 ```
 
 or a version-pinned URL:
-`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.6.0/schema/adapter.schema.json`.
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.7.0/schema/adapter.schema.json`.
 The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
 helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
 authority, because some rules (selector compilation, cross-field checks) cannot be expressed
@@ -291,12 +291,20 @@ meant. Fixing such a key turns that setting on, so the next run can behave diffe
 also changes the adapter's fingerprint, so `count_drop_ratio` starts a new history. Keys
 inside a section are stricter: an unknown one fails validation.
 
-`map` entries are `{ path, normalize? }`. `path` is a dot-path into the raw source item
+`map` entries are `{ path, normalize?, assume_zone? }`. `path` is a dot-path into the raw source item
 (`"$"` for the item itself, `geometry.coordinates.0` for an array index). `normalize` is
 one of `text` (strips HTML, decodes numeric character references, collapses whitespace),
 `number`, `iso-date` (validates a real calendar date; returns `YYYY-MM-DD` or `null` —
-never a silently-wrapped invalid date), or `bool`. `source_id` and `url` are always
-required identity fields, independent of whatever else you list in `required`.
+never a silently-wrapped invalid date), `iso-datetime` (since 0.7; keeps the time and
+returns UTC `YYYY-MM-DDTHH:mm:ss.sssZ`, for example `2026-10-19T20:53:15+05:30` →
+`2026-10-19T15:23:15.000Z`; a value with no zone, no time, or an impossible date gives
+`null`), or `bool`. `assume_zone: "Z"` (since 0.7, only with `iso-datetime`) reads a time
+that has no zone as UTC, for sources that document their times as UTC, such as WordPress
+`date_gmt`. A value with its own zone keeps it. Switching a field from `iso-date` to
+`iso-datetime` changes its stored value, so every record shows as changed once, and the
+adapter fingerprint changes (`count_drop_ratio` starts a new history). `source_id` and
+`url` are always required identity fields, independent of whatever else you list in
+`required`.
 
 `access.url`'s hostname must equal `adapter.host` (or be a subdomain of it) — this is a
 provenance guarantee, not a formality: it's what makes a record's `source_host` trustworthy.
