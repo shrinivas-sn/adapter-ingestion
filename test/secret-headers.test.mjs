@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateAdapter } from '../src/adapter.mjs';
+import { readFile } from 'node:fs/promises';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { KNOWN_KEYS } from '../src/config.mjs';
 
 const base = {
   version: 1, host: 'example.test',
@@ -54,3 +57,25 @@ test('secret headers: an invalid header name with a reference is still rejected'
   assert.equal(result.ok, false);
   assert.ok(result.errors.includes('fetch.headers must be a valid header map'), JSON.stringify(result.errors));
 });
+
+// ---- schema ---------------------------------------------------------------
+
+const schema = JSON.parse(await readFile(new URL('../schema/adapter.schema.json', import.meta.url), 'utf8'));
+const validateSchema = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
+
+test('secret headers: schema header_ref lists exactly KNOWN_KEYS.header_ref', () => {
+  assert.deepEqual(Object.keys(schema.$defs.header_ref.properties).sort(), KNOWN_KEYS.header_ref);
+});
+
+for (const [name, headers] of Object.entries(VALID_HEADERS)) {
+  test(`secret headers: the schema accepts ${name}`, () => {
+    assert.equal(validateSchema(withHeaders(headers)), true, JSON.stringify(validateSchema.errors));
+  });
+}
+
+for (const headers of [{ A: { env: '1BAD' } }, { A: { env: 'X', secret: true } }, { A: { optional: true } }]) {
+  test(`secret headers: schema and validateAdapter both reject ${JSON.stringify(headers)}`, () => {
+    assert.equal(validateSchema(withHeaders(headers)), false, 'schema should reject');
+    assert.equal(validateAdapter(withHeaders(headers)).ok, false, 'validateAdapter should reject');
+  });
+}

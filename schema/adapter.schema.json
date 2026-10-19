@@ -163,9 +163,16 @@
         "headers": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/header_ref"
+              }
+            ]
           },
-          "description": "Request headers, name -> string value."
+          "description": "Request headers, name -> a string, or { \"env\": NAME } to read a secret from an environment variable."
         },
         "timeout_ms": {
           "type": "integer",
@@ -314,6 +321,25 @@
           "description": "Optional value cleaning."
         }
       }
+    },
+    "header_ref": {
+      "type": "object",
+      "required": [
+        "env"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "description": "Name of the environment variable that holds the value. Read when the run starts; never written to a report."
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "true: send no header when the variable is unset or empty. Default false: the run fails with E_HEADER_ENV."
+        }
+      },
+      "description": "A header value read from an environment variable (since 0.6)."
     },
     "canary": {
       "type": "object",
