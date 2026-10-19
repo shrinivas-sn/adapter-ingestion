@@ -282,6 +282,15 @@ authority, because some rules (selector compilation, cross-field checks) cannot 
 in a schema. `$schema` does not change an adapter's fingerprint, so adding it keeps the
 canary's history.
 
+Top-level keys the engine does not read are ignored, so you can keep your own metadata in an
+adapter. Start their names with `_` (`_notes`, `_owner`): no release will give such a key a
+meaning. Since 0.5, a top-level key one edit away from `fetch`, `records_path`, `required`
+or `canary` (for example `record_path`, `recordsPath`, `requried`, `canry`) gets an
+`A_TOP_LEVEL_KEY_TYPO` notice in `doctor` and in the run report, naming the key it probably
+meant. Fixing such a key turns that setting on, so the next run can behave differently. It
+also changes the adapter's fingerprint, so `count_drop_ratio` starts a new history. Keys
+inside a section are stricter: an unknown one fails validation.
+
 `map` entries are `{ path, normalize? }`. `path` is a dot-path into the raw source item
 (`"$"` for the item itself, `geometry.coordinates.0` for an array index). `normalize` is
 one of `text` (strips HTML, decodes numeric character references, collapses whitespace),

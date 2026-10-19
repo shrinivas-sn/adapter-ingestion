@@ -56,6 +56,8 @@ wording of error messages, the layout of files in `runs/`) may change in any rel
   format is part of the public surface (record keys above).
 - The adapter `version` field changes only for a breaking adapter change, and then a
   migration tool ships with it.
+- Top-level adapter keys that start with `_` are reserved for your own use: no release will
+  give one a meaning, and `A_TOP_LEVEL_KEY_TYPO` never flags one.
 
 ## Node support
 
