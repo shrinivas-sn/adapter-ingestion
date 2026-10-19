@@ -28,6 +28,25 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.5 → 0.6
+
+### Free with no changes
+
+- Nothing changes for existing adapters.
+
+### Opt in
+
+- Read a secret header from an environment variable:
+  `"headers": { "x-api-key": { "env": "MY_API_KEY" } }`. An unset or empty variable fails
+  the run with the new `E_HEADER_ENV` (exit 2); add `"optional": true` to send no header
+  instead. If you wrapped `fetchImpl` only to add a key, you can drop the wrapper. Moving a
+  literal header value into a reference changes the adapter fingerprint once
+  (`count_drop_ratio` starts a new history).
+
+### Action needed
+
+- None.
+
 ## 0.4 → 0.5
 
 ### Free with no changes

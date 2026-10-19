@@ -172,8 +172,8 @@ Every command takes `--json` and then prints exactly one JSON object on stdout:
 - a usage or load error: `{ error: { code, message } }`
 
 Exit codes: `0` ok; `1` a stale run, an operational error or an abort; `2` a usage or
-configuration problem (bad arguments, an invalid adapter, an unsupported Node version, or
-an html adapter without `cheerio`). Without `--json`, `run` prints a summary on stdout and
+configuration problem (bad arguments, an invalid adapter, an unsupported Node version, an
+html adapter without `cheerio`, or an unset `fetch.headers` environment variable). Without `--json`, `run` prints a summary on stdout and
 notices and failures on stderr. These commands, flags, keys and exit codes are part of the
 public surface ([VERSIONING.md](VERSIONING.md)). The older `node src/run.mjs <adapter.json>`
 entry point still works unchanged.
@@ -275,7 +275,7 @@ that ships with the package (since 0.4). Either the installed copy, which works 
 ```
 
 or a version-pinned URL:
-`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.4.0/schema/adapter.schema.json`.
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.6.0/schema/adapter.schema.json`.
 The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
 helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
 authority, because some rules (selector compilation, cross-field checks) cannot be expressed
@@ -300,6 +300,16 @@ required identity fields, independent of whatever else you list in `required`.
 
 `access.url`'s hostname must equal `adapter.host` (or be a subdomain of it) — this is a
 provenance guarantee, not a formality: it's what makes a record's `source_host` trustworthy.
+
+`fetch.headers` (optional) maps a header name to a string, or to
+`{ "env": "NAME", "optional"?: true }` to read a secret from an environment variable (since
+0.6), for example `"Authorization": { "env": "API_TOKEN" }`. The value is read once when the
+run starts and sent on every page. It never appears in an error, a run report, the history
+file or CLI output, and a custom `kinds` parser sees only the reference. An unset or empty
+variable fails the run with `E_HEADER_ENV` (CLI exit 2) before any request; with
+`"optional": true` the header is left out instead. Put the full header text in the variable
+(`Bearer …` included). Rotating the secret keeps the adapter's fingerprint; moving a literal
+value into a reference changes it once, so `count_drop_ratio` starts a new history.
 
 `fetch.pagination` (optional): `{ style: 'page-param', param, per_page?, per_page_param?,
 max_pages?, allow_truncation? }`. Hitting `max_pages` on a still-full-looking page is a

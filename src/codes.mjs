@@ -34,6 +34,12 @@ export const CODES = Object.freeze({
     cause: 'An unknown operator, a malformed rule, or a reserved field name.',
     fix: 'Fix the filter JSON; the message lists each problem.',
   },
+  E_HEADER_ENV: {
+    kind: 'error',
+    meaning: 'A fetch header reads an environment variable that is unset, empty, or not a valid header value.',
+    cause: 'The variable is not set in this shell or CI step, or its value has a line break or another character a header cannot hold.',
+    fix: 'Set the variable where the run happens (in CI, as a secret). Mark the header "optional": true to send no header when it is unset.',
+  },
   E_HTTP_STATUS: {
     kind: 'error',
     meaning: 'The server answered with a status that is not a success.',

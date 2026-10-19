@@ -21,6 +21,10 @@ const KNOWN_PAGINATION_KEYS = new Set(['style', 'param', 'max_pages', 'per_page'
 const KNOWN_INCREMENTAL_KEYS = new Set(['param', 'type']);
 const KNOWN_RETRY_KEYS = new Set(['max_attempts', 'backoff_ms', 'max_delay_ms']);
 const KNOWN_MAP_RULE_KEYS = new Set(['path', 'normalize']);
+// A fetch.headers value may be { env, optional? }: the value is read from
+// that environment variable at run time (src/fetch/headers.mjs), never here.
+const KNOWN_HEADER_REF_KEYS = new Set(['env', 'optional']);
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const KNOWN_CANARY_KEYS = new Set([
   'min_records', 'median_window', 'count_drop_ratio', 'required_field_ratio',
   'max_staleness_days', 'staleness_field',
@@ -37,6 +41,7 @@ export const KNOWN_KEYS = Object.freeze({
   retry: [...KNOWN_RETRY_KEYS].sort(),
   map_rule: [...KNOWN_MAP_RULE_KEYS].sort(),
   canary: [...KNOWN_CANARY_KEYS].sort(),
+  header_ref: [...KNOWN_HEADER_REF_KEYS].sort(),
   top_level: [...KNOWN_TOP_LEVEL_KEYS].sort(),
 });
 
@@ -186,12 +191,22 @@ function validateFetchSection(adapter, need) {
     need(isPlainObject(f.headers), 'fetch.headers must be a plain object');
     if (isPlainObject(f.headers)) {
       for (const [k, v] of Object.entries(f.headers)) {
-        need(typeof v === 'string', `fetch.headers.${k} must be a string`);
+        if (isPlainObject(v)) {
+          checkUnknownKeys(v, KNOWN_HEADER_REF_KEYS, `fetch.headers.${k}`, need);
+          need(typeof v.env === 'string' && ENV_NAME_RE.test(v.env),
+            `fetch.headers.${k}.env must be an environment variable name (letters, digits, _; not starting with a digit)`);
+          if (v.optional !== undefined) need(typeof v.optional === 'boolean', `fetch.headers.${k}.optional must be true or false`);
+        } else {
+          need(typeof v === 'string', `fetch.headers.${k} must be a string`);
+        }
       }
       try {
+        // Only names are checked for a reference: its value comes from the
+        // environment at run time.
+        const names = Object.fromEntries(Object.entries(f.headers).map(([k, v]) => [k, isPlainObject(v) ? 'x' : v]));
         // eslint-disable-next-line no-new -- native Headers is the source of
         // truth for what a valid header name/value actually is.
-        new Headers(f.headers);
+        new Headers(names);
       } catch {
         need(false, 'fetch.headers must be a valid header map');
       }

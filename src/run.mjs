@@ -360,8 +360,9 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, kind
 // already does.
 //
 // Exit codes (section 6.2): 0 outcome ok; 1 stale/operational error/aborted;
-// 2 usage/configuration (the run never got past validating options/adapter).
-const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID']);
+// 2 usage/configuration (bad options or adapter, or an env header that is not
+// set; nothing was fetched).
+const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID', 'E_HEADER_ENV']);
 const USAGE = 'usage: node src/run.mjs <adapter.json> [--since YYYY-MM-DD]';
 
 // Exactly one positional path plus an optional --since <value>. Everything
