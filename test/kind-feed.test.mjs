@@ -1,6 +1,8 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { feedDate, feedKind, _setCheerioLoaderForTest } from '../src/kinds/feed.mjs';
+import { resolveKind, validateKindsOption } from '../src/kinds/index.mjs';
+import { validateAdapter } from '../src/adapter.mjs';
 
 // access.kind "feed" (since 0.9): RSS 2.0, RSS 1.0 and Atom. Shapes come
 // from real feeds (WordPress News, GitHub releases, Python Insider, BBC);
@@ -221,4 +223,33 @@ test('validate: records_path must be absent or "$"', () => {
   assert.deepEqual(errors, []);
   feedKind.validate({ records_path: 'items' }, need);
   assert.deepEqual(errors, ['records_path must be "$" when access.kind is "feed"']);
+});
+
+const WORDPRESS = {
+  version: 1,
+  host: 'wordpress.org',
+  access: { tier: 0, kind: 'feed', url: 'https://wordpress.org/news/feed/' },
+  map: {
+    source_id: { path: 'id' },
+    url: { path: 'url' },
+    title: { path: 'title', normalize: 'text' },
+    published: { path: 'published', normalize: 'iso-datetime' },
+  },
+  required: ['source_id', 'url', 'title'],
+};
+
+test('feed is a built-in kind: the spec adapter validates', () => {
+  assert.deepEqual(validateAdapter(WORDPRESS), { ok: true, errors: [] });
+  const bad = validateAdapter({ ...WORDPRESS, records_path: 'x' });
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.includes('records_path must be "$" when access.kind is "feed"'), bad.errors.join(' | '));
+});
+
+test('a caller kind registered as feed still wins over the built-in', () => {
+  const callerKind = { parse: async () => [] };
+  assert.equal(resolveKind('feed'), feedKind);
+  assert.doesNotThrow(() => validateKindsOption({ feed: callerKind }));
+  const resolved = resolveKind('feed', { feed: callerKind });
+  assert.notEqual(resolved, feedKind);
+  assert.equal(resolved.name, 'feed');
 });
