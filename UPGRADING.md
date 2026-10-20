@@ -28,6 +28,29 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.7 → 0.8
+
+### Free with no changes
+
+- Nothing changes for existing adapters.
+- A kind you registered yourself as `csv` keeps being used exactly as before; the new
+  built-in `csv` applies only when no kind of that name is registered.
+- The "not supported by this engine" message now lists `csv` among the supported kinds.
+
+### Opt in
+
+- `access.kind: "csv"` reads a CSV file with a header row: one record per row, cells as
+  strings, empty cells as `null`. No extra package needed. See README "Source kinds".
+- `{ "template": "..." }` in place of `path` in a `map` rule builds a value from several
+  fields, such as `"{entity}:{year}"` or `"https://example.org/item/{id}"`. A missing value
+  makes the field `null`. Useful for any kind, and needed for a CSV with no URL column.
+- To move a parser you registered as `csv` onto the built-in, drop it from `kinds`. Check
+  one run first: cells become `null` when empty, and the built-in is strict about quoting.
+
+### Action needed
+
+- None.
+
 ## 0.6 → 0.7
 
 ### Free with no changes

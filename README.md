@@ -5,9 +5,10 @@
 [![node](https://img.shields.io/node/v/@shrinivas-sn/adapter-ingestion)](package.json)
 [![license](https://img.shields.io/npm/l/@shrinivas-sn/adapter-ingestion)](LICENSE)
 
-Keeps a Node app supplied with fresh records from JSON APIs and server-rendered HTML pages
-on a schedule. That covers official APIs, the JSON endpoints many sites expose without
-advertising them as an API, and plain HTML listings read with CSS selectors.
+Keeps a Node app supplied with fresh records from JSON APIs, CSV files and server-rendered
+HTML pages on a schedule. That covers official APIs, the JSON endpoints many sites expose
+without advertising them as an API, published CSV data files, and plain HTML listings read
+with CSS selectors.
 An adapter is a small JSON config written once per source, and a plain-rules runner applies
 it on every cron at zero LLM cost. A relevance filter is a read-time view over stored
 records, never a write-time gate. A canary flags a stale adapter, loudly, when a source
@@ -18,7 +19,7 @@ Requires **Node 22.15.0 or newer**. Upgrading from 0.1.x? See [MIGRATION-0.2.md]
 
 ## Is this for you?
 
-**Use it if** you are in Node and want scheduled JSON or HTML pulls into a plain file store
+**Use it if** you are in Node and want scheduled JSON, CSV or HTML pulls into a plain file store
 with no database. You also get change detection (fresh / changed / unchanged) and an alarm when
 a source goes quiet or changes shape.
 
@@ -275,7 +276,7 @@ that ships with the package (since 0.4). Either the installed copy, which works 
 ```
 
 or a version-pinned URL:
-`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.7.0/schema/adapter.schema.json`.
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.8.0/schema/adapter.schema.json`.
 The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
 helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
 authority, because some rules (selector compilation, cross-field checks) cannot be expressed
@@ -291,7 +292,7 @@ meant. Fixing such a key turns that setting on, so the next run can behave diffe
 also changes the adapter's fingerprint, so `count_drop_ratio` starts a new history. Keys
 inside a section are stricter: an unknown one fails validation.
 
-`map` entries are `{ path, normalize?, assume_zone? }`. `path` is a dot-path into the raw source item
+`map` entries are `{ path, normalize?, assume_zone? }` or `{ template }`. `path` is a dot-path into the raw source item
 (`"$"` for the item itself, `geometry.coordinates.0` for an array index). `normalize` is
 one of `text` (strips HTML, decodes numeric character references, collapses whitespace),
 `number`, `iso-date` (validates a real calendar date; returns `YYYY-MM-DD` or `null` —
@@ -305,6 +306,24 @@ that has no zone as UTC, for sources that document their times as UTC, such as W
 adapter fingerprint changes (`count_drop_ratio` starts a new history). `source_id` and
 `url` are always required identity fields, independent of whatever else you list in
 `required`.
+
+`template` (since 0.8) builds a value from several fields of the raw item, for a source with
+no URL column or no single id column:
+
+```json
+"source_id": { "template": "{entity}:{year}" },
+"url": { "template": "https://earthquake.usgs.gov/earthquakes/eventpage/{id}" }
+```
+
+- `{name}` reads a path, as `path` does (dot segments, no `$`). Other `{` or `}`
+  characters are not allowed. A template may have no placeholder (a fixed value).
+- A placeholder needs a non-blank string or a finite number. Anything else (missing, `null`,
+  blank, `true`, an object) makes the whole field `null`, never a half-built value.
+- In a template that starts with `http://` or `https://`, each value is percent-encoded
+  (`/` is kept, so `openrouter.ai/{id}` works with `anthropic/claude`), and the scheme and
+  host must be written out: `https://{host}/x` is a validation error.
+- In any other template, values are inserted as they are. `template` cannot be combined
+  with `path`, `normalize` or `assume_zone`.
 
 `access.url`'s hostname must equal `adapter.host` (or be a subdomain of it) — this is a
 provenance guarantee, not a formality: it's what makes a record's `source_host` trustworthy.
@@ -330,6 +349,43 @@ read, so every kind gets the same transport rules: timeouts, byte caps, retries,
 redirects, pagination and repeat-page checks, `max_records`, and the canary.
 
 **`json-api`**: the body is JSON; `records_path` points at the array of records.
+
+**`csv`** (since 0.8): a CSV file with a header row. Each data row becomes one record, keyed
+by the header names, so `map` paths are column names. No extra package is needed.
+
+```json
+{
+  "version": 1,
+  "host": "earthquake.usgs.gov",
+  "access": { "tier": 0, "kind": "csv", "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.csv" },
+  "map": {
+    "source_id": { "path": "id" },
+    "url": { "template": "https://earthquake.usgs.gov/earthquakes/eventpage/{id}" },
+    "place": { "path": "place", "normalize": "text" },
+    "magnitude": { "path": "mag", "normalize": "number" },
+    "time": { "path": "time", "normalize": "iso-datetime" }
+  },
+  "required": ["source_id", "url", "magnitude"]
+}
+```
+
+- The format is RFC 4180: `,` between cells, `"` around a cell that holds commas, quotes
+  (written `""`) or line breaks. Line ends may be LF, CRLF or CR. Empty lines are skipped.
+- The body must be UTF-8 (a byte-order mark is removed); anything else is `E_PARSE`.
+- Every cell is the exact string, untrimmed; an empty cell is `null`. Use `normalize` to get
+  numbers, dates and booleans.
+- Header names are used exactly as written. A repeated name, or more than 1000 columns, is
+  `E_PARSE`. A column with an empty header name is left out of the record.
+- A short row gives `null` for its missing cells. A value past the last header column (or
+  under an empty header name) is `E_PARSE`; empty trailing cells are fine.
+- Broken quoting (text after a closing quote, a quote never closed) is `E_PARSE`. Every
+  `E_PARSE` message names the line, never the cell text.
+- `records_path` must be omitted or `"$"`. Rows beyond `fetch.max_records` fail with
+  `E_RECORD_LIMIT` while parsing.
+- The stored `raw` is the whole row, every named column included.
+
+The repository's `adapters/ourworldindata.org.adapter.json` is a worked example, with a
+composite id (`{entity}:{year}`) and its recorded file under `fixtures/`.
 
 **`html`**: server-rendered pages. Install the optional peer first (`npm install cheerio`);
 without it, an html adapter fails with `E_KIND_DEPENDENCY`. Selectors are data in the
@@ -375,23 +431,26 @@ platforms, each with its recorded page under `fixtures/`.
 **Your own format (`kinds`)**: register a parser and name it in `access.kind`.
 
 ```js
-const csv = {
+const tsv = {
   // Bytes in, an array of plain objects out (sync or async).
   parse({ bytes }) {
     const [header, ...lines] = bytes.toString('utf8').trim().split('\n');
-    const keys = header.split(',');
-    return lines.map((line) => Object.fromEntries(line.split(',').map((v, i) => [keys[i], v])));
+    const keys = header.split('\t');
+    return lines.map((line) => Object.fromEntries(line.split('\t').map((v, i) => [keys[i], v])));
   },
   // Optional: extra adapter checks, reported like built-in ones.
-  validate(adapter, need) { need(adapter.records_path === '$', 'csv adapters use records_path "$"'); },
+  validate(adapter, need) { need(adapter.records_path === '$', 'tsv adapters use records_path "$"'); },
 };
 
-// adapter.access = { tier: 1, kind: 'csv', url: 'https://example.test/data.csv' }
-await runIngest({ adapter, paths, kinds: { csv } });
+// adapter.access = { tier: 1, kind: 'tsv', url: 'https://example.test/data.tsv' }
+await runIngest({ adapter, paths, kinds: { tsv } });
 ```
 
-`parse` receives `{ bytes, contentType, url, adapter }`. A name that shadows a built-in kind
-is `E_OPTIONS`. If `parse` throws, the run fails with `E_PARSE` and a generic message: your
+`parse` receives `{ bytes, contentType, url, adapter }`. `json-api` and `html` can never be
+replaced: registering either name is `E_OPTIONS`. A built-in kind added later (since 0.8:
+`csv`) is used only when you have not registered a kind of that name, so a parser you
+registered as `csv` before 0.8 keeps being used; drop it to switch to the built-in. If
+`parse` throws, the run fails with `E_PARSE` and a generic message: your
 error's text never reaches a report (it stays on `err.cause`). A result that is not the array
 `records_path` expects fails with `E_RESPONSE_SHAPE`, as for JSON.
 
@@ -491,6 +550,10 @@ history only from it. A run that fails validation or cannot take the lock adds n
 - **Records that share a `source_id` within one run collapse to one** (the last one wins). A
   page that lists the same link twice, such as a menu plus the body, reports more `fetched`
   than `fresh` + `changed` + `unchanged`.
+- **A CSV column whose header contains a `.` cannot be mapped.** Paths split on `.`, so
+  `v1.0` reads key `v1`, then `0`. The column is still kept in `raw`.
+- **A CSV with no id column needs a composite id.** Pick columns that are unique together
+  (`{entity}:{year}`), or rows collapse as described above.
 - **No cross-source fuzzy dedupe** (within-source only, by design — see Non-goals).
 
 ## Non-goals
