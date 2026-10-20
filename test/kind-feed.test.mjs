@@ -100,6 +100,16 @@ test('RSS: a permalink guid stands in for a missing link, a non-permalink does n
     ['https://example.test/a', 'https://example.test/b', 'https://example.test/c', 'tag:example.test,2026:d']);
 });
 
+test('RSS: a guid stands in for the link only when it is an absolute http(s) URL', async () => {
+  const items = await parse(rss(`
+    <item><guid>21753</guid></item>
+    <item><guid>/posts/9</guid></item>
+    <item><guid>javascript:alert(1)</guid></item>
+    <item><guid>21753</guid><link>/rel</link></item>`));
+  assert.deepEqual(items.map((i) => i.url), [null, null, null, 'https://example.test/rel']);
+  assert.deepEqual(items.map((i) => i.id), ['21753', '/posts/9', 'javascript:alert(1)', '21753']);
+});
+
 test('RSS 1.0 (RDF): items are siblings of channel; dc:date is read', async () => {
   const items = await parse(`<?xml version="1.0"?>
   <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"

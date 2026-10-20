@@ -135,11 +135,13 @@ function rssItem($, el, base) {
   };
   const guidEl = child(el, 'guid');
   const guid = text('guid');
-  // RSS 2.0: a guid is a permalink unless it says isPermaLink="false".
+  // RSS 2.0: a guid is a permalink unless it says isPermaLink="false". It is
+  // never resolved against the feed URL: many feeds put a bare post id there.
   const guidIsLink = guidEl !== undefined && $(guidEl).attr('isPermaLink') !== 'false';
+  const link = text('link');
   return {
     id: guid,
-    url: resolveHttpUrl(text('link') ?? (guidIsLink ? guid : null), base),
+    url: link !== null ? resolveHttpUrl(link, base) : guidIsLink ? resolveHttpUrl(guid, undefined) : null,
     title: text('title'),
     summary: text('description'),
     content: text('content:encoded'),
