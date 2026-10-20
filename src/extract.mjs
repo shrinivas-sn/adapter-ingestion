@@ -90,7 +90,7 @@ export function extractAll(rawItems, adapter, { fetchedAt }) {
     const fields = {};
     for (const [name, rule] of Object.entries(adapter.map)) {
       const raw = getPath(item, rule.path);
-      const value = rule.normalize ? applyNormalizer(rule.normalize, raw) : (raw ?? null);
+      const value = rule.normalize ? applyNormalizer(rule.normalize, raw, rule) : (raw ?? null);
       fields[name] = value === undefined ? null : value;
     }
 

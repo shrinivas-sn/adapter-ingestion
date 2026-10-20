@@ -34,6 +34,9 @@ Each source is described by an **adapter**: a JSON file, not code.
   it). It names the store file (`store/<host>.jsonl`), the runs directory and every record
   id (`<host>:<source_id>`), so changing it later starts a new store.
 - `records_path` defaults to `"$"` (the parsed body itself is the array of records).
+- Use `"normalize": "iso-datetime"` (since 0.7) to keep the time of day; `iso-date` keeps
+  only the day. A time with no zone gives `null` unless the rule has `"assume_zone": "Z"`;
+  add that only when the source documents its times as UTC.
 - `access.url` must be on `host` (or a subdomain of it).
 - `map.source_id` and `map.url` are always required.
 - Never put an API key or token in adapter JSON. Use

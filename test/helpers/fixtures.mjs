@@ -41,7 +41,7 @@ export function newestStalenessInstant(adapter, fixtureRoot) {
   let best = null;
   for (const item of rawItems) {
     const raw = getPath(item, rule.path);
-    const value = rule.normalize ? applyNormalizer(rule.normalize, raw) : raw;
+    const value = rule.normalize ? applyNormalizer(rule.normalize, raw, rule) : raw;
     if (value === null || value === undefined) continue;
     const instant = typeof value === 'number' ? value
       : isValidDateOnly(value) ? Date.parse(`${value}T00:00:00Z`)

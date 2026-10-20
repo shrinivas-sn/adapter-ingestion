@@ -94,6 +94,10 @@ function monthNumberFromName(word) {
 // hand against isValidCalendarDate plus explicit hour/minute/second/offset
 // ranges, so epoch numbers/seconds are never accidentally accepted here.
 const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+// iso-datetime: the same grammar as the ISO branch above, but the time is
+// required. The zone is optional only so assume_zone can supply it; with no
+// zone and no assume_zone the value is null, never a local-vs-UTC guess.
+const ISO_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})?$/;
 const ENGLISH_DMY_RE = /^(\d{1,2})([-/\s])([A-Za-z]+)\2(\d{4})$/;
 const NUMERIC_DMY_RE = /^(\d{1,2})([-/])(\d{1,2})\2(\d{4})$/;
 
@@ -145,6 +149,47 @@ function isoDate(v) {
   return null;
 }
 
+// Returns the instant in UTC as YYYY-MM-DDTHH:mm:ss.sssZ (toISOString), so
+// values sort as text and pass the canary's staleness check unchanged.
+// Unlike iso-date, this shifts to UTC: a timestamp names an instant, not a
+// calendar day. Only setUTC*/getUTC* are used, so the machine's time zone
+// never matters.
+function isoDatetime(v, options = {}) {
+  if (v === null || v === undefined) return null;
+  const m = String(v).trim().match(ISO_DATETIME_RE);
+  if (!m) return null;
+  const [, yStr, moStr, dStr, hStr, miStr, secStr = '00', frac = '', offStr] = m;
+  const year = Number(yStr);
+  const month = Number(moStr);
+  const day = Number(dStr);
+  const hour = Number(hStr);
+  const minute = Number(miStr);
+  const second = Number(secStr);
+  if (year < 1 || !isValidCalendarDate(year, month, day)) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  let offsetMinutes = 0;
+  if (offStr === undefined) {
+    if (options.assume_zone !== 'Z') return null;
+  } else if (offStr !== 'Z') {
+    const [, sign, offH, offMin] = offStr.match(/^([+-])(\d{2}):(\d{2})$/);
+    if (Number(offH) > 23 || Number(offMin) > 59) return null;
+    offsetMinutes = (sign === '-' ? -1 : 1) * (Number(offH) * 60 + Number(offMin));
+  }
+
+  // Cut to milliseconds, never rounded: rounding could carry ...59.9995 into
+  // the next minute.
+  const ms = Number(frac.padEnd(3, '0').slice(0, 3));
+  // setUTCFullYear keeps years 0-99 as written; Date.UTC would map them to
+  // 1900-1999.
+  const t = new Date(0);
+  t.setUTCFullYear(year, month - 1, day);
+  t.setUTCHours(hour, minute - offsetMinutes, second, ms);
+  const utcYear = t.getUTCFullYear();
+  if (utcYear < 1 || utcYear > 9999) return null;
+  return t.toISOString();
+}
+
 function bool(v) {
   const s = String(v ?? '').trim().toLowerCase();
   if (['yes', 'true', '1', 'y'].includes(s)) return true;
@@ -152,15 +197,22 @@ function bool(v) {
   return null;
 }
 
-const NORMALIZERS = { text, number, 'iso-date': isoDate, bool };
+const NORMALIZERS = { text, number, 'iso-date': isoDate, 'iso-datetime': isoDatetime, bool };
 
 /**
- * @param {'text'|'number'|'iso-date'|'bool'} name
+ * @param {'text'|'number'|'iso-date'|'iso-datetime'|'bool'} name
  * @param {any} value
+ * @param {{ assume_zone?: 'Z' }} [options] a map rule; only assume_zone is read
  * @returns {any}
  */
-export function applyNormalizer(name, value) {
+export function applyNormalizer(name, value, options) {
   const fn = NORMALIZERS[name];
   if (!fn) throw new Error(`unknown normalizer: ${name}`);
-  return fn(value);
+  const opts = options ?? {};
+  // Checked only where it has a meaning: extractAll passes the whole map
+  // rule, and before 0.7 every other normalizer ignored extra rule keys.
+  if (name === 'iso-datetime' && opts.assume_zone !== undefined && opts.assume_zone !== 'Z') {
+    throw new Error('assume_zone must be "Z"');
+  }
+  return fn(value, opts);
 }
