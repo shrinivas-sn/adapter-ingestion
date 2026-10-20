@@ -2,6 +2,7 @@ import { IngestionError } from '../errors.mjs';
 import { jsonKind } from './json.mjs';
 import { htmlKind } from './html.mjs';
 import { csvKind } from './csv.mjs';
+import { feedKind } from './feed.mjs';
 
 // A kind turns a response's raw bytes into the body that records_path walks:
 //   { name, validate(adapter, need), parse({ bytes, contentType, url, adapter }) }
@@ -11,6 +12,7 @@ export const BUILTIN_KINDS = Object.freeze(new Map(/** @type {Array<[string, imp
   [jsonKind.name, jsonKind],
   [htmlKind.name, htmlKind],
   [csvKind.name, csvKind],
+  [feedKind.name, feedKind],
 ])));
 
 // The kinds that existed before 0.8 can never be replaced by a caller kind.

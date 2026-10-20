@@ -1,5 +1,7 @@
-# Evidence fixtures (HTML, CSV) are recorded byte-for-byte (BOMs, CRLF, legacy
+# Evidence fixtures (HTML, CSV, XML feeds) are recorded byte-for-byte (BOMs, CRLF, legacy
 # encodings such as KOI8-R); line-ending conversion would change what the
 # parser sees, so git must never treat them as text.
 fixtures/**/*.html -text
 fixtures/**/*.csv -text
+fixtures/**/*.xml -text
+fixtures/**/*.atom -text

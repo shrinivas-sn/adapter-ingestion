@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+    <channel>
+        <title><![CDATA[BBC News]]></title>
+        <description><![CDATA[BBC News - Technology]]></description>
+        <link>https://www.bbc.co.uk/news/technology</link>
+        <image>
+            <url>https://news.bbcimg.co.uk/nol/shared/img/bbc_news_120x60.gif</url>
+            <title>BBC News</title>
+            <link>https://www.bbc.co.uk/news/technology</link>
+        </image>
+        <generator>RSS for Node</generator>
+        <lastBuildDate>Tue, 20 Oct 2026 07:56:10 GMT</lastBuildDate>
+        <atom:link href="https://feeds.bbci.co.uk/news/technology/rss.xml" rel="self" type="application/rss+xml"/>
+        <copyright><![CDATA[Copyright: (C) British Broadcasting Corporation, see https://www.bbc.co.uk/usingthebbc/terms-of-use/#15metadataandrssfeeds for terms and conditions of reuse.]]></copyright>
+        <language><![CDATA[en-gb]]></language>
+        <ttl>15</ttl>
+        <item>
+            <title><![CDATA[Ex-OpenAI worker accused of planting device had Saudi support, says court filing]]></title>
+            <description><![CDATA[The Saudi government did not immediately respond to BBC requests for comment.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/c6gel2dlyxvyo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/c6gel2dlyxvyo#0</guid>
+            <pubDate>Mon, 19 Oct 2026 21:12:30 GMT</pubDate>
+            <media:thumbnail width="240" height="134" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/ad18/live/95af9980-cbd2-11f1-aba9-2bb2608f11d9.png"/>
+        </item>
+        <item>
+            <title><![CDATA[US bans DeepSeek AI from government use as tech tension with China continues]]></title>
+            <description><![CDATA[DeepSeek is a powerful, popular and relatively inexpensive artificial intelligence model out of China.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/cjkgeq0k1wevo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/cjkgeq0k1wevo#0</guid>
+            <pubDate>Mon, 19 Oct 2026 18:21:54 GMT</pubDate>
+            <media:thumbnail width="240" height="135" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/76fb/live/a102f4a0-cbe9-11f1-ad7b-fd8c269705fe.jpg"/>
+        </item>
+        <item>
+            <title><![CDATA[Uber wins bid to throw out £200m black cab claims]]></title>
+            <description><![CDATA[Claims that Uber misled TfL over its licence were thrown out because they were brought too late.
+
+]]></description>
+            <link>https://www.bbc.co.uk/news/articles/cv5ynp1j45x2o?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/cv5ynp1j45x2o#0</guid>
+            <pubDate>Mon, 19 Oct 2026 12:58:39 GMT</pubDate>
+            <media:thumbnail width="240" height="135" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/55c0/live/e258cdd0-0819-11ef-8205-3fa833ece17b.jpg"/>
+        </item>
+</channel>
+</rss>

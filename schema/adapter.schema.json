@@ -137,7 +137,8 @@
               "enum": [
                 "json-api",
                 "html",
-                "csv"
+                "csv",
+                "feed"
               ]
             },
             {
