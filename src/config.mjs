@@ -1,5 +1,6 @@
 import { isValidDateOnly } from './normalize.mjs';
 import { builtinKindNames, resolveKind } from './kinds/index.mjs';
+import { parseTemplate } from './template.mjs';
 
 const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'iso-datetime', 'bool']);
 const MANDATORY_MAP_KEYS = ['source_id', 'url'];
@@ -20,7 +21,7 @@ const KNOWN_FETCH_KEYS = new Set([
 const KNOWN_PAGINATION_KEYS = new Set(['style', 'param', 'max_pages', 'per_page', 'per_page_param', 'allow_truncation']);
 const KNOWN_INCREMENTAL_KEYS = new Set(['param', 'type']);
 const KNOWN_RETRY_KEYS = new Set(['max_attempts', 'backoff_ms', 'max_delay_ms']);
-const KNOWN_MAP_RULE_KEYS = new Set(['path', 'normalize', 'assume_zone']);
+const KNOWN_MAP_RULE_KEYS = new Set(['path', 'normalize', 'assume_zone', 'template']);
 // A fetch.headers value may be { env, optional? }: the value is read from
 // that environment variable at run time (src/fetch/headers.mjs), never here.
 const KNOWN_HEADER_REF_KEYS = new Set(['env', 'optional']);
@@ -258,6 +259,16 @@ function validateMap(adapter, need) {
     need(isPlainObject(rule), `map.${name} must be an object`);
     if (!isPlainObject(rule)) continue;
     checkUnknownKeys(rule, KNOWN_MAP_RULE_KEYS, `map.${name}`, need);
+    // A template (since 0.8) replaces path; without one, every check below
+    // and its message are exactly what 0.7 reported.
+    if (rule.template !== undefined) {
+      need(rule.path === undefined, `map.${name} must have either path or template, not both`);
+      need(rule.normalize === undefined && rule.assume_zone === undefined,
+        `map.${name}.template cannot be combined with normalize or assume_zone`);
+      const parsed = parseTemplate(rule.template);
+      if (parsed.ok === false) need(false, `map.${name}.template ${parsed.error}`);
+      continue;
+    }
     need(typeof rule.path === 'string' && rule.path.length > 0, `map.${name}.path is required`);
     if (typeof rule.path === 'string' && rule.path.length > 0) {
       need(isValidPathString(rule.path), `map.${name}.path must be "$" or nonempty dot segments`);

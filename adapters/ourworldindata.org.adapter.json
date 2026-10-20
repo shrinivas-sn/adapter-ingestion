@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "host": "ourworldindata.org",
+  "access": { "tier": 0, "kind": "csv", "url": "https://ourworldindata.org/grapher/life-expectancy.csv?v=1&csvType=full&useColumnShortNames=true" },
+  "fetch": {
+    "headers": { "User-Agent": "adapter-ingestion-recipe/1.0" },
+    "max_records": 30000
+  },
+  "map": {
+    "source_id":       { "template": "{entity}:{year}" },
+    "url":             { "template": "https://ourworldindata.org/grapher/life-expectancy" },
+    "entity":          { "path": "entity",            "normalize": "text" },
+    "code":            { "path": "code",              "normalize": "text" },
+    "year":            { "path": "year",              "normalize": "number" },
+    "life_expectancy": { "path": "life_expectancy_0", "normalize": "number" }
+  },
+  "required": ["source_id", "url", "entity", "year", "life_expectancy"],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.4,
+    "required_field_ratio": 0.9
+  }
+}

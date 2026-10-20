@@ -136,14 +136,15 @@
             {
               "enum": [
                 "json-api",
-                "html"
+                "html",
+                "csv"
               ]
             },
             {
               "type": "string"
             }
           ],
-          "description": "How the body becomes records: \"json-api\", \"html\" (needs the optional cheerio peer), or the name of a kind you register with the kinds option."
+          "description": "How the body becomes records: \"json-api\", \"html\" (needs the optional cheerio peer), \"csv\" (since 0.8; a header row, one record per row), or the name of a kind you register with the kinds option."
         },
         "url": {
           "type": "string",
@@ -301,9 +302,6 @@
     },
     "map_rule": {
       "type": "object",
-      "required": [
-        "path"
-      ],
       "additionalProperties": false,
       "properties": {
         "path": {
@@ -324,8 +322,34 @@
         "assume_zone": {
           "const": "Z",
           "description": "Since 0.7, with normalize iso-datetime only: read a time that has no zone as UTC. A value with its own zone keeps it."
+        },
+        "template": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Since 0.8, instead of path: build the value from the raw record, e.g. \"{entity}:{year}\" or \"https://example.org/item/{id}\". A missing or blank value makes the field null. In a template starting with http:// or https:// values are percent-encoded (except /) and the host must be literal."
         }
       },
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "path"
+          ],
+          "properties": {
+            "path": true
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "template"
+          ],
+          "properties": {
+            "template": true
+          }
+        }
+      ],
       "dependentSchemas": {
         "assume_zone": {
           "type": "object",
@@ -336,6 +360,13 @@
             "normalize": {
               "const": "iso-datetime"
             }
+          }
+        },
+        "template": {
+          "type": "object",
+          "properties": {
+            "normalize": false,
+            "assume_zone": false
           }
         }
       }

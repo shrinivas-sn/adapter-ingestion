@@ -1,6 +1,7 @@
 import { applyNormalizer } from './normalize.mjs';
 import { buildRecord, isValidSourceId, isValidSourceUrl } from './contract.mjs';
 import { IngestionError } from './errors.mjs';
+import { parseTemplate, renderTemplate } from './template.mjs';
 
 const MAX_ERROR_SAMPLES = 20;
 
@@ -86,9 +87,24 @@ export function extractAll(rawItems, adapter, { fetchedAt }) {
     }
   };
 
+  // Parsed once per call, not per record. extractAll is public and may get
+  // an adapter that was never validated, so a broken template yields null.
+  const templates = new Map();
+  for (const [name, rule] of Object.entries(adapter.map)) {
+    if (rule !== null && typeof rule === 'object' && rule.template !== undefined) {
+      const parsed = parseTemplate(rule.template);
+      templates.set(name, parsed.ok ? parsed : null);
+    }
+  }
+
   rawItems.forEach((item, index) => {
     const fields = {};
     for (const [name, rule] of Object.entries(adapter.map)) {
+      if (templates.has(name)) {
+        const parsed = templates.get(name);
+        fields[name] = parsed === null ? null : renderTemplate(parsed.parts, parsed.isUrl, item);
+        continue;
+      }
       const raw = getPath(item, rule.path);
       const value = rule.normalize ? applyNormalizer(rule.normalize, raw, rule) : (raw ?? null);
       fields[name] = value === undefined ? null : value;

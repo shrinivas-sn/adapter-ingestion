@@ -1,6 +1,6 @@
 # adapter-ingestion
 
-> Scheduled ingestion of JSON APIs and HTML pages into a local JSONL store, with change detection, a read-time relevance filter, and a canary that flags a source that changed shape or went quiet.
+> Scheduled ingestion of JSON APIs, CSV files and HTML pages into a local JSONL store, with change detection, a read-time relevance filter, and a canary that flags a source that changed shape or went quiet.
 
 npm package `@shrinivas-sn/adapter-ingestion`: plain JavaScript (ES modules) with no runtime dependencies, Node 22.15 or newer. Each source is a JSON adapter checked by `validateAdapter` and `schema/adapter.schema.json`. Every run writes a report (`report_version` 2) with an `outcome`, a canary verdict and `notices` (advice `A_*`, deprecations `D_*`). The `adapter-ingestion` CLI has `validate`, `run`, `explain` and `doctor`, each with `--json`. Agents should start with AGENTS.md.
 

@@ -3,8 +3,8 @@
 For coding agents that have only the installed package. Paths below are relative to
 `node_modules/@shrinivas-sn/adapter-ingestion/`.
 
-This package runs a scheduled ingestion job: it fetches a JSON API or a server-rendered HTML
-page, turns it into records, stores new and changed records in a local JSONL file, and
+This package runs a scheduled ingestion job: it fetches a JSON API, a CSV file or a
+server-rendered HTML page, turns it into records, stores new and changed records in a local JSONL file, and
 writes a run report with a canary that flags a source that changed shape or went quiet.
 Each source is described by an **adapter**: a JSON file, not code.
 
@@ -39,6 +39,10 @@ Each source is described by an **adapter**: a JSON file, not code.
   add that only when the source documents its times as UTC.
 - `access.url` must be on `host` (or a subdomain of it).
 - `map.source_id` and `map.url` are always required.
+- No URL or id field in the source? Build one with `{ "template": "https://example.org/item/{id}" }`
+  or `{ "template": "{entity}:{year}" }` (since 0.8) instead of `path`. A missing value makes
+  the field `null`; in a template that starts with `http(s)://` values are percent-encoded
+  and the host must be written out.
 - Never put an API key or token in adapter JSON. Use
   `"fetch": { "headers": { "Authorization": { "env": "API_TOKEN" } } }` (since 0.6) and set
   the variable where the run happens. Unset → `E_HEADER_ENV`, exit 2; add
@@ -93,6 +97,35 @@ README section "Writing an adapter by hand" and the schema's descriptions.
    - `script_json` mode: `script` (a CSS selector for a `<script>` holding JSON, such as
      JSON-LD or `__NEXT_DATA__`); then `records_path` and `map` work as for JSON.
 4. Validate, doctor and run as above.
+
+## Recipe: add a CSV file source
+
+Since 0.8. No extra package needed.
+
+1. Fetch the file and check that the first non-empty line is a header row, the text is
+   UTF-8, and cells are separated by `,` (other delimiters are not supported yet).
+2. Use `access.kind: "csv"` and leave `records_path` out: each row is one record, and map
+   paths are header names, used exactly as written.
+3. Cells are strings, or `null` when empty: add `normalize` (`number`, `iso-date`,
+   `iso-datetime`, `bool`, `text`) to type them.
+4. Most CSV files have no URL column: build `url` with a `template`, and `source_id` with a
+   composite template when no single column is unique.
+
+   ```json
+   {
+     "version": 1,
+     "host": "data.example.org",
+     "access": { "tier": 0, "kind": "csv", "url": "https://data.example.org/export/items.csv" },
+     "map": {
+       "source_id": { "template": "{region}:{year}" },
+       "url": { "template": "https://data.example.org/items/{region}" },
+       "value": { "path": "value", "normalize": "number" }
+     },
+     "required": ["source_id", "url", "value"]
+   }
+   ```
+
+5. Validate, doctor and run as above. A broken file fails with `E_PARSE` naming the line.
 
 ## Recipe: run on a schedule (CI)
 
