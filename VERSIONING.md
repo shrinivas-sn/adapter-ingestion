@@ -24,7 +24,7 @@ wording of error messages, the layout of files in `runs/`) may change in any rel
 
 **Source kind names.** `json-api` and `html` can never be replaced by a kind you register
 with the `kinds` option (`E_OPTIONS`). A built-in kind added in a later minor (since 0.8:
-`csv`) yields to a kind you registered under the same name, so a new built-in never takes
+`csv`; since 0.9: `feed`) yields to a kind you registered under the same name, so a new built-in never takes
 over a name you already use.
 
 ## What each release may change

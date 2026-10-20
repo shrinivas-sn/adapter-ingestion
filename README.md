@@ -5,10 +5,10 @@
 [![node](https://img.shields.io/node/v/@shrinivas-sn/adapter-ingestion)](package.json)
 [![license](https://img.shields.io/npm/l/@shrinivas-sn/adapter-ingestion)](LICENSE)
 
-Keeps a Node app supplied with fresh records from JSON APIs, CSV files and server-rendered
-HTML pages on a schedule. That covers official APIs, the JSON endpoints many sites expose
-without advertising them as an API, published CSV data files, and plain HTML listings read
-with CSS selectors.
+Keeps a Node app supplied with fresh records from JSON APIs, CSV files, RSS and Atom feeds,
+and server-rendered HTML pages on a schedule. That covers official APIs, the JSON endpoints
+many sites expose without advertising them as an API, published CSV data files, blog, news
+and release feeds, and plain HTML listings read with CSS selectors.
 An adapter is a small JSON config written once per source, and a plain-rules runner applies
 it on every cron at zero LLM cost. A relevance filter is a read-time view over stored
 records, never a write-time gate. A canary flags a stale adapter, loudly, when a source
@@ -19,7 +19,7 @@ Requires **Node 22.15.0 or newer**. Upgrading from 0.1.x? See [MIGRATION-0.2.md]
 
 ## Is this for you?
 
-**Use it if** you are in Node and want scheduled JSON, CSV or HTML pulls into a plain file store
+**Use it if** you are in Node and want scheduled JSON, CSV, feed or HTML pulls into a plain file store
 with no database. You also get change detection (fresh / changed / unchanged) and an alarm when
 a source goes quiet or changes shape.
 
@@ -34,9 +34,11 @@ a source goes quiet or changes shape.
 
 **What it ingests today** (HTTP GET, see [Source kinds](#source-kinds)):
 - JSON (`json-api`).
+- CSV files with a header row (`csv`, since 0.8).
+- RSS 2.0, RSS 1.0 and Atom feeds (`feed`, since 0.9). Needs the optional `cheerio` package.
 - HTML pages (`html`): rows picked by CSS selectors, or the JSON inside a `<script>` such
   as JSON-LD or `__NEXT_DATA__`. Needs the optional `cheerio` package.
-- Any other format (CSV, XML, ...) through a `kinds` parser you register.
+- Any other format (other XML, ...) through a `kinds` parser you register.
 
 ```
   generator (once, per source)  ->  adapter file
@@ -276,7 +278,7 @@ that ships with the package (since 0.4). Either the installed copy, which works 
 ```
 
 or a version-pinned URL:
-`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.8.0/schema/adapter.schema.json`.
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.9.0/schema/adapter.schema.json`.
 The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
 helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
 authority, because some rules (selector compilation, cross-field checks) cannot be expressed
@@ -387,6 +389,57 @@ by the header names, so `map` paths are column names. No extra package is needed
 
 The repository's `adapters/ourworldindata.org.adapter.json` is a worked example, with a
 composite id (`{entity}:{year}`) and its recorded file under `fixtures/`.
+
+**`feed`** (since 0.9): an RSS 2.0, RSS 1.0 (RDF) or Atom 1.0 feed, such as a WordPress
+site's `/feed/`, a GitHub `releases.atom` or a news feed. Each item or entry becomes one
+record, with the same keys whatever the format, so one `map` works for any feed. Install
+the optional peer first (`npm install cheerio`); without it, a feed adapter fails with
+`E_KIND_DEPENDENCY`.
+
+```json
+{
+  "version": 1,
+  "host": "wordpress.org",
+  "access": { "tier": 0, "kind": "feed", "url": "https://wordpress.org/news/feed/" },
+  "map": {
+    "source_id": { "path": "id" },
+    "url": { "path": "url" },
+    "title": { "path": "title", "normalize": "text" },
+    "published": { "path": "published", "normalize": "iso-datetime" }
+  },
+  "required": ["source_id", "url", "title"]
+}
+```
+
+| Key | RSS | Atom |
+|---|---|---|
+| `id` | `guid` | `id` |
+| `url` | `link`, else a `guid` that is a permalink | the `link` with no `rel` or `rel="alternate"` (`type="text/html"` first) |
+| `title` | `title` | `title` |
+| `summary` | `description` | `summary` |
+| `content` | `content:encoded` | `content` (the markup itself when `type="xhtml"`) |
+| `published` | `pubDate`, else `dc:date` | `published` |
+| `updated` | always `null` | `updated` |
+| `author` | `author`, else `dc:creator` | the entry's `author` `name`, else the feed's |
+| `categories` | every `category` | every `category` `term` |
+
+- Every key is always present. Text is trimmed; an empty or missing value is `null`.
+  `categories` is an array, possibly empty.
+- `published` and `updated` are already ISO 8601 UTC (`2026-10-06T17:00:00.000Z`): RSS dates
+  (`Tue, 06 Oct 2026 17:00:00 +0000`) are converted. A date that cannot be read exactly is
+  `null`.
+- `url` is resolved against the feed URL; anything but `http`/`https` becomes `null`.
+- The format is detected from the root element (`rss`, `rdf:RDF` or `feed`), not the
+  Content-Type. Any other root, such as an HTML error page, is `E_PARSE`.
+- Encoding: a byte-order mark, else the Content-Type charset, else the XML declaration, else
+  UTF-8. DTD entities are never expanded and external entities are never read.
+- `records_path` must be omitted or `"$"`. Items beyond `fetch.max_records` fail with
+  `E_RECORD_LIMIT`. An empty feed gives 0 records (the canary's `min_records` reports it).
+- The stored `raw` is the item object above, not the XML.
+
+The repository's `adapters/wordpress.org.adapter.json` (RSS) and
+`adapters/github.com.adapter.json` (Atom) are worked examples, with recorded feeds under
+`fixtures/`.
 
 **`html`**: server-rendered pages. Install the optional peer first (`npm install cheerio`);
 without it, an html adapter fails with `E_KIND_DEPENDENCY`. Selectors are data in the
@@ -530,9 +583,9 @@ history only from it. A run that fails validation or cannot take the lock adds n
   100MB across all pages). A source with a legitimately larger page size or slower response
   needs these raised explicitly — the defaults exist so an unattended cron run can't hang
   indefinitely or OOM the runner on a single misbehaving or hostile response. `html`
-  defaults to 5MB per response instead, because a parsed page takes many times its size
-  in memory; set `fetch.max_response_bytes` to change it. A page with more rows than
-  `max_records` fails before any record is built.
+  and `feed` default to 5MB per response instead, because a parsed page takes many times
+  its size in memory; set `fetch.max_response_bytes` to change it. A page with more rows
+  (or a feed with more items) than `max_records` fails before any record is built.
 - **Parsing is CPU work that `timeout_ms` does not interrupt.** The timeout covers the
   request and the body download; `max_duration_ms` is checked again once parsing returns.
   A pathological page (thousands of nested elements) can still take seconds to parse, so
@@ -555,6 +608,15 @@ history only from it. A run that fails validation or cannot take the lock adds n
   `v1.0` reads key `v1`, then `0`. The column is still kept in `raw`.
 - **A CSV with no id column needs a composite id.** Pick columns that are unique together
   (`{entity}:{year}`), or rows collapse as described above.
+- **A feed item with no `guid` has a `null` id.** Map `source_id` from `url` for such feeds.
+- **Feed `summary` and `content` are usually HTML.** They are kept as written; add
+  `"normalize": "text"` to strip the tags.
+- **Feed dates with a two-digit year or a single-letter military zone are `null`**, and the
+  weekday is not checked. `xml:base` is not applied: relative links resolve against the
+  feed URL.
+- **A feed's own namespace prefixes are matched as written** (`dc:`, `content:`). A feed that
+  binds Dublin Core to another prefix gives `null` for `dc:creator` and `dc:date`.
+  Extension elements (`media:thumbnail`, `enclosure`) are not read yet.
 - **No cross-source fuzzy dedupe** (within-source only, by design — see Non-goals).
 
 ## Non-goals

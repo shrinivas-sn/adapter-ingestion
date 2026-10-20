@@ -28,6 +28,29 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.8 → 0.9
+
+### Free with no changes
+
+- Nothing changes for existing adapters.
+- A kind you registered yourself as `feed` keeps being used exactly as before; the new
+  built-in `feed` applies only when no kind of that name is registered.
+- The "not supported by this engine" message now lists `feed` among the supported kinds.
+
+### Opt in
+
+- `access.kind: "feed"` reads an RSS 2.0, RSS 1.0 or Atom feed: one record per item, with
+  the keys `id`, `url`, `title`, `summary`, `content`, `published`, `updated`, `author` and
+  `categories` whatever the format. Dates are converted to ISO 8601 UTC. Needs the optional
+  `cheerio` package, as `html` does. See README "Source kinds".
+- If you read feeds through the `html` kind or a parser of your own, one `feed` adapter can
+  replace it. Check one run first: record ids come from `guid`/`id`, so the store starts
+  new records under the new ids.
+
+### Action needed
+
+- None.
+
 ## 0.7 → 0.8
 
 ### Free with no changes

@@ -3,8 +3,8 @@
 For coding agents that have only the installed package. Paths below are relative to
 `node_modules/@shrinivas-sn/adapter-ingestion/`.
 
-This package runs a scheduled ingestion job: it fetches a JSON API, a CSV file or a
-server-rendered HTML page, turns it into records, stores new and changed records in a local JSONL file, and
+This package runs a scheduled ingestion job: it fetches a JSON API, a CSV file, an RSS or
+Atom feed, or a server-rendered HTML page, turns it into records, stores new and changed records in a local JSONL file, and
 writes a run report with a canary that flags a source that changed shape or went quiet.
 Each source is described by an **adapter**: a JSON file, not code.
 
@@ -126,6 +126,39 @@ Since 0.8. No extra package needed.
    ```
 
 5. Validate, doctor and run as above. A broken file fails with `E_PARSE` naming the line.
+
+## Recipe: add an RSS or Atom feed
+
+Since 0.9.
+
+1. `npm install cheerio` (the optional peer; without it feed adapters fail with
+   `E_KIND_DEPENDENCY`).
+2. Find the feed URL: WordPress sites serve `/feed/`, GitHub repositories
+   `/releases.atom`; otherwise look for `<link rel="alternate" type="application/rss+xml">`
+   in the page head. Fetch it once and check it is not a redirect.
+3. Use `access.kind: "feed"` and leave `records_path` out. RSS 2.0, RSS 1.0 and Atom are
+   detected automatically. Every item has the same keys: `id`, `url`, `title`, `summary`,
+   `content`, `published`, `updated`, `author`, `categories`. Dates are already ISO UTC.
+
+   ```json
+   {
+     "version": 1,
+     "host": "wordpress.org",
+     "access": { "tier": 0, "kind": "feed", "url": "https://wordpress.org/news/feed/" },
+     "map": {
+       "source_id": { "path": "id" },
+       "url": { "path": "url" },
+       "title": { "path": "title", "normalize": "text" },
+       "published": { "path": "published", "normalize": "iso-datetime" }
+     },
+     "required": ["source_id", "url", "title"]
+   }
+   ```
+
+4. No `guid` in the feed (`id` is `null`)? Map `source_id` from `url` instead. Atom feeds
+   often have no `published`: use `updated`.
+5. Validate, doctor and run as above. A page that is not a feed fails with `E_PARSE` naming
+   its root element.
 
 ## Recipe: run on a schedule (CI)
 
