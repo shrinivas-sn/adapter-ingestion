@@ -1,0 +1,21 @@
+time,latitude,longitude,depth,mag,magType,nst,gap,dmin,rms,net,id,updated,place,type,horizontalError,depthError,magError,magNst,status,locationSource,magSource
+2026-10-20T04:46:41.200Z,59.834,-148.346,26.9,2.8,ml,47,158,0.5,0.9,ak,aka2026utrymy,2026-10-20T04:50:56.007Z,"31 km SW of Chenega, Alaska",earthquake,4.8,3.7228,0.2,30,automatic,ak,ak
+2026-10-20T04:45:08.250Z,19.044332504273,-155.36666870117,34.150001525879,2.3,ml,49,210,0.1427,0.140000001,hv,hv75061171,2026-10-20T05:21:37.040Z,"21 km SE of Pāhala, Hawaii",earthquake,0.53,0.779999971,0.34,3,automatic,hv,hv
+2026-10-20T04:44:09.462Z,62.445,-151.365,99.6,2.3,ml,44,84,0.3,0.5,ak,aka2026utrwis,2026-10-20T04:48:10.623Z,"31 km W of Petersville, Alaska",earthquake,2.9,2.9783,0.2,23,automatic,ak,ak
+2026-10-20T04:37:42.044Z,61.729,-151.038,81.1,1.9,ml,15,90,0.4,0.4,ak,aka2026utrqtc,2026-10-20T04:39:04.160Z,"34 km NW of Susitna, Alaska",earthquake,5.3,5.3311,0.1,6,automatic,ak,ak
+2026-10-20T04:20:38.737Z,-13.9906,165.5892,16,6.3,mww,138,27,6.641,0.81,us,us6000u3jl,2026-10-20T05:09:13.719Z,"197 km NW of Port-Olry, Vanuatu",earthquake,8.73,1.726,0.035,77,reviewed,us,us
+2026-10-20T04:10:13.433Z,59.783,-151.774,60.8,1.9,ml,29,101,0.4,0.6,ak,aka2026utqsuj,2026-10-20T04:13:19.539Z,"3 km ENE of Anchor Point, Alaska",earthquake,4,4.192,0.2,15,automatic,ak,ak
+2026-10-20T03:52:53.850Z,36.174331665039,-120.75,-0.44999998807907,1.72,md,11,174,0.05866,0.17,nc,nc75452366,2026-10-20T03:54:28.848Z,"22 km NE of San Ardo, CA",earthquake,0.8,8.14999962,0.22,5,automatic,nc,nc
+2026-10-20T03:50:33.530Z,60.671,-152.018,85.3,1.8,ml,28,76,0.2,0.5,ak,aka2026utqbxw,2026-10-20T03:54:06.850Z,"38 km W of Salamatof, Alaska",earthquake,6.2,3.3806,0.2,17,automatic,ak,ak
+2026-10-20T03:46:28.860Z,38.796165466309,-122.77600097656,3.0499999523163,0.74,md,10,80,0.009778,0.02,nc,nc75452361,2026-10-20T03:48:03.898Z,"3 km NW of The Geysers, CA",earthquake,0.51,1.16999996,0.08,9,automatic,nc,nc
+2026-10-20T03:41:12.090Z,38.862335205078,-122.82783508301,0.93999999761581,0.39,md,11,133,0.008426,0.02,nc,nc75452356,2026-10-20T03:42:48.983Z,"10 km WNW of Cobb, CA",earthquake,0.27,0.430000007,0.17,10,automatic,nc,nc
+2026-10-20T03:31:49.160Z,38.834331512451,-122.78283691406,1.8899999856949,1.29,md,20,73,0.007138,0.02,nc,nc75452351,2026-10-20T03:33:23.807Z,"5 km WNW of Cobb, CA",earthquake,0.23,0.370000005,0.08,21,automatic,nc,nc
+2026-10-20T03:05:22.900Z,18.680333333333,-64.570833333333,13.63,2.9,md,5,252,0.2476,0.11,pr,pr71537308,2026-10-20T03:21:32.280Z,"45 km NNE of Cruz Bay, U.S. Virgin Islands",earthquake,1.65,2.32,0.1216710363381,4,reviewed,pr,pr
+2026-10-20T02:54:15.972Z,18.2529,146.0345,129.361,5,mb,71,74,3.011,1.01,us,us6000u3jd,2026-10-20T05:05:28.819Z,"Pagan region, Northern Mariana Islands",earthquake,10.88,7.356,0.054,107,reviewed,us,us
+2026-10-20T02:15:01.990Z,38.804164886475,-122.81950378418,3.1500000953674,1.04,md,12,71,0.008899,0.02,nc,nc75452346,2026-10-20T02:16:40.011Z,"6 km WNW of The Geysers, CA",earthquake,0.39,0.75,0.26,13,automatic,nc,nc
+2026-10-20T02:09:00.210Z,35.961166381836,-120.52166748047,10.550000190735,2.28,md,37,60,0.02134,0.12,nc,nc75452336,2026-10-20T02:37:25.254Z,"11 km NW of Parkfield, CA",earthquake,0.23,0.360000014,0.19,37,automatic,nc,nc
+2026-10-20T02:00:19.302Z,58.257,-154.944,8.6,0.6,ml,8,146,0.1,0.2,ak,aka2026utmkfr,2026-10-20T02:01:21.000Z,"81 km NNW of Karluk, Alaska",earthquake,10.7,14.695,0.1,4,automatic,ak,ak
+2026-10-20T01:55:02.260Z,33.6665,-116.75233333333,13.74,0.79,ml,37,56,0.06554,0.17,ci,ci41349575,2026-10-20T01:58:25.758Z,"9 km SSW of Idyllwild, CA",earthquake,0.18,0.35,0.169105058004,21,automatic,ci,ci
+2026-10-20T01:54:47.068Z,61.623,-150.856,61.8,1.6,ml,6,237,0.5,0.1,ak,aka2026utmfmg,2026-10-20T01:55:54.316Z,"20 km WNW of Susitna, Alaska",earthquake,65.5,26.5068,0.3,4,automatic,ak,ak
+2026-10-20T01:44:58.858Z,59.493,-152.593,75.3,1.9,ml,32,99,0.4,0.3,ak,aka2026utlwze,2026-10-20T01:48:09.980Z,"41 km WNW of Nanwalek, Alaska",earthquake,4.6,3.1282,0.3,17,automatic,ak,ak
+2026-10-20T01:35:34.893Z,58.253,-154.939,10.1,0.6,ml,10,160,0.1,0.2,ak,aka2026utlovi,2026-10-20T01:36:16.002Z,"81 km NNW of Karluk, Alaska",earthquake,10.8,11.6016,0.1,6,automatic,ak,ak
