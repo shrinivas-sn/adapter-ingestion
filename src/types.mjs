@@ -10,7 +10,7 @@
  * @property {{ tier: number, kind: string, url: string }} access
  * @property {Record<string, any>} [fetch]
  * @property {string} [records_path]
- * @property {Record<string, { path: string, normalize?: 'text'|'number'|'iso-date'|'iso-datetime'|'bool', assume_zone?: 'Z' }>} map
+ * @property {Record<string, { path?: string, template?: string, normalize?: 'text'|'number'|'iso-date'|'iso-datetime'|'bool', assume_zone?: 'Z' }>} map
  * @property {string[]} [required]
  * @property {Record<string, any>} [canary]
  * @property {Record<string, any>} [html]

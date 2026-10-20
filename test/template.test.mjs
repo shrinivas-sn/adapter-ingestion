@@ -1,5 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { validateAdapter } from '../src/adapter.mjs';
+import { extractAll } from '../src/extract.mjs';
+import { runIngest } from '../src/run.mjs';
+import { readRecords } from '../src/store.mjs';
 import { parseTemplate, renderTemplate, MAX_TEMPLATE_LENGTH, MAX_PLACEHOLDERS } from '../src/template.mjs';
 
 // template (since 0.8): build a map field from several values of the raw
@@ -113,4 +121,83 @@ test('renderTemplate: values are read from own properties only', () => {
   const item = Object.create({ inherited: 'leak' });
   assert.equal(render('{inherited}', item), null);
   assert.equal(render('{toString}', {}), null);
+});
+
+// ---- Task 1.2: validation, schema, extraction, end to end ----
+
+const base = {
+  version: 1, host: 'example.test',
+  access: { tier: 1, kind: 'json-api', url: 'https://example.test/api' },
+  map: { source_id: { path: 'id' }, url: { template: 'https://example.test/e/{id}' } },
+};
+const withMap = (map) => ({ ...base, map: { ...base.map, ...map } });
+const schema = JSON.parse(await readFile(new URL('../schema/adapter.schema.json', import.meta.url), 'utf8'));
+const validateSchema = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
+
+test('validateAdapter and the schema accept template rules', () => {
+  for (const adapter of [base, withMap({ source_id: { template: '{a}:{b}' } }), withMap({ fixed: { template: 'https://example.test/' } })]) {
+    assert.deepEqual(validateAdapter(adapter), { ok: true, errors: [] });
+    assert.equal(validateSchema(adapter), true, JSON.stringify(validateSchema.errors));
+  }
+});
+
+const INVALID_RULES = {
+  'path and template': [{ url: { path: 'link', template: 'https://example.test/{id}' } }, 'map.url must have either path or template, not both'],
+  'template and normalize': [{ url: { template: 'https://example.test/{id}', normalize: 'text' } }, 'map.url.template cannot be combined with normalize or assume_zone'],
+  'template and assume_zone': [{ url: { template: 'https://example.test/{id}', assume_zone: 'Z' } }, 'map.url.template cannot be combined with normalize or assume_zone'],
+  'empty template': [{ url: { template: '' } }, 'map.url.template must be a nonempty string of at most 2000 characters'],
+  'placeholder in host': [{ url: { template: 'https://{h}/x' } }, 'map.url.template must keep the scheme and host literal (no placeholder before the first "/", "?" or "#" after "://")'],
+};
+
+for (const [name, [map, message]] of Object.entries(INVALID_RULES)) {
+  test(`validateAdapter rejects ${name}`, () => {
+    const r = validateAdapter(withMap(map));
+    assert.equal(r.ok, false);
+    assert.ok(r.errors.includes(message), JSON.stringify(r.errors));
+  });
+}
+
+test('the schema rejects what validateAdapter rejects, where JSON Schema can tell', () => {
+  for (const name of ['path and template', 'template and normalize', 'template and assume_zone', 'empty template']) {
+    assert.equal(validateSchema(withMap(INVALID_RULES[name][0])), false, name);
+  }
+});
+
+test('a rule with neither path nor template keeps the 0.7 message exactly', () => {
+  const r = validateAdapter(withMap({ url: {} }));
+  assert.deepEqual(r.errors, ['map.url.path is required']);
+  assert.equal(validateSchema(withMap({ url: {} })), false);
+});
+
+test('extractAll renders templates and drops a record whose url has a missing value', () => {
+  const adapter = withMap({ source_id: { template: '{a}:{b}' }, url: { template: 'https://example.test/e/{a}' } });
+  const { records, errors } = extractAll([{ a: 'x', b: 2 }, { b: 3 }], adapter, { fetchedAt: '2026-10-20T00:00:00.000Z' });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].fields.source_id, 'x:2');
+  assert.equal(records[0].id, 'example.test:x:2');
+  assert.equal(records[0].source_url, 'https://example.test/e/x');
+  assert.equal(errors[0].code, 'E_RECORD_INVALID');
+  assert.deepEqual(errors[0].missing.sort(), ['source_id', 'url']);
+});
+
+test('extractAll on an unvalidated adapter with a broken template gives null, never a throw', () => {
+  const adapter = withMap({ note: { template: '{a' }, other: { template: 42 } });
+  const { records } = extractAll([{ id: 'x', a: 'y' }], adapter, { fetchedAt: '2026-10-20T00:00:00.000Z' });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].fields.note, null);
+  assert.equal(records[0].fields.other, null);
+});
+
+test('runIngest stores a templated url end to end', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'template-'));
+  try {
+    const paths = { storeFile: join(dir, 'store.jsonl'), runsDir: join(dir, 'runs') };
+    const fetchImpl = async () => new Response(JSON.stringify([{ id: 'org/a b' }]), { status: 200 });
+    const { report } = await runIngest({ adapter: base, paths, fetchImpl, now: new Date('2026-10-20T00:00:00Z') });
+    assert.equal(report.outcome, 'ok', JSON.stringify(report.failure ?? report.errors));
+    const records = await readRecords(paths.storeFile);
+    assert.equal(records[0].source_url, 'https://example.test/e/org/a%20b');
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
