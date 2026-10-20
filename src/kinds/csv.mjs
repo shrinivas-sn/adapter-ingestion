@@ -10,6 +10,10 @@ import { IngestionError } from '../errors.mjs';
 // Messages name a line and a rule, never cell text: cells can hold anything.
 
 const MAX_COLUMNS = 1000;
+// Every row holds every named column, so a 2-byte short row still costs a
+// full-width object. This bounds rows x named columns (about 200 MB of heap
+// at the cap); the defaults (5000 rows, 1000 columns) never reach it.
+export const MAX_CELLS = 5_000_000;
 // One run of ordinary characters in an unquoted cell.
 const PLAIN_RUN = /[^,\r\n"]+/y;
 
@@ -19,10 +23,10 @@ function parseError(line, what) {
 
 /**
  * @param {string} text
- * @param {{ maxRows?: number, maxRecords?: number }} [options]
+ * @param {{ maxRows?: number, maxRecords?: number, maxCells?: number }} [options]
  * @returns {Record<string, string | null>[]}
  */
-export function parseCsv(text, { maxRows, maxRecords } = {}) {
+export function parseCsv(text, { maxRows, maxRecords, maxCells = MAX_CELLS } = {}) {
   /** @type {string[] | null} */
   let header = null;
   /** @type {number[]} indexes of the columns that have a name */
@@ -78,6 +82,9 @@ export function parseCsv(text, { maxRows, maxRecords } = {}) {
     }
     if (maxRows !== undefined && rows.length >= maxRows) {
       throw new IngestionError('E_RECORD_LIMIT', `fetch exceeded max_records (${maxRecords})`);
+    }
+    if ((rows.length + 1) * named.length > maxCells) {
+      throw parseError(rowLine, `the file has more than ${maxCells} cells (rows times named columns)`);
     }
     /** @type {Record<string, string | null>} */
     const row = { ...shape };

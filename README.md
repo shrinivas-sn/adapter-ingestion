@@ -381,7 +381,8 @@ by the header names, so `map` paths are column names. No extra package is needed
 - Broken quoting (text after a closing quote, a quote never closed) is `E_PARSE`. Every
   `E_PARSE` message names the line, never the cell text.
 - `records_path` must be omitted or `"$"`. Rows beyond `fetch.max_records` fail with
-  `E_RECORD_LIMIT` while parsing.
+  `E_RECORD_LIMIT` while parsing. Every row holds every named column, so rows times named
+  columns is capped at 5,000,000 (`E_PARSE`); the defaults never reach it.
 - The stored `raw` is the whole row, every named column included.
 
 The repository's `adapters/ourworldindata.org.adapter.json` is a worked example, with a

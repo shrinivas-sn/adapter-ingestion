@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { csvKind, parseCsv } from '../src/kinds/csv.mjs';
+import { csvKind, parseCsv, MAX_CELLS } from '../src/kinds/csv.mjs';
 import { builtinKindNames, resolveKind, validateKindsOption } from '../src/kinds/index.mjs';
 import { validateAdapter } from '../src/adapter.mjs';
 import { runIngest } from '../src/run.mjs';
@@ -235,4 +235,21 @@ test('a malformed registration named csv is not replaced by the built-in', () =>
   assert.equal(resolveKind('csv', { csv: { parse: 'nope' } }), null);
   assert.equal(resolveKind('csv', { other: { parse() {} } }), csvKind);
   assert.equal(validateAdapter(adapter, { kinds: { csv: { parse: 'nope' } } }).ok, false);
+});
+
+// ---- Review fix: short rows cannot blow memory up past a cell budget ----
+
+test('the cell budget (rows times named columns) is 5,000,000 by default', () => {
+  assert.equal(MAX_CELLS, 5_000_000);
+});
+
+test('more cells than the budget is E_PARSE, checked before the row is built', () => {
+  // 3 named columns, 1-byte rows: each row still costs 3 cells.
+  const text = 'a,b,c\nx\ny\nz\n';
+  assert.equal(parseCsv(text, { maxCells: 9 }).length, 3);
+  rejects(() => parseCsv(text, { maxCells: 8 }), 'E_PARSE', /^csv line 4: the file has more than 8 cells \(rows times named columns\)$/);
+});
+
+test('unnamed columns do not count against the cell budget', () => {
+  assert.equal(parseCsv('a,,\n1,,\n2,,\n', { maxCells: 2 }).length, 2);
 });
