@@ -79,6 +79,7 @@ export function parseCsv(text, { maxRows, maxRecords } = {}) {
     if (maxRows !== undefined && rows.length >= maxRows) {
       throw new IngestionError('E_RECORD_LIMIT', `fetch exceeded max_records (${maxRecords})`);
     }
+    /** @type {Record<string, string | null>} */
     const row = { ...shape };
     for (const k of named) {
       if (k < values.length && values[k] !== '') row[header[k]] = values[k];
