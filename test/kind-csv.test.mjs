@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { csvKind, parseCsv } from '../src/kinds/csv.mjs';
+import { builtinKindNames, resolveKind, validateKindsOption } from '../src/kinds/index.mjs';
+import { validateAdapter } from '../src/adapter.mjs';
+import { runIngest } from '../src/run.mjs';
+import { readRecords } from '../src/store.mjs';
 
 // access.kind "csv" (since 0.8). Shapes come from real files (LiveBench
 // cost, the USGS earthquake feed, Our World in Data); values are invented.
@@ -130,4 +137,102 @@ test('validate: records_path must be omitted or "$"', () => {
   assert.deepEqual(run({}), []);
   assert.deepEqual(run({ records_path: '$' }), []);
   assert.deepEqual(run({ records_path: 'data' }), ['records_path must be "$" when access.kind is "csv"']);
+});
+
+// ---- Task 2.2: the built-in kind, and caller kinds of the same name ----
+
+const adapter = {
+  version: 1, host: 'example.test',
+  access: { tier: 0, kind: 'csv', url: 'https://example.test/data.csv' },
+  map: { source_id: { path: 'id' }, url: { template: 'https://example.test/item/{id}' }, name: { path: 'name', normalize: 'text' } },
+  required: ['name'],
+};
+const csvResponse = (text) => async () => new Response(text, { status: 200, headers: { 'content-type': 'text/csv' } });
+
+async function withPaths(fn) {
+  const dir = await mkdtemp(join(tmpdir(), 'kind-csv-'));
+  try {
+    return await fn({ storeFile: join(dir, 'store.jsonl'), runsDir: join(dir, 'runs') });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+test('csv is a built-in kind', () => {
+  assert.ok(builtinKindNames().includes('csv'));
+  assert.equal(resolveKind('csv'), csvKind);
+});
+
+test('validateAdapter accepts a csv adapter with no kinds option, and applies its rules', () => {
+  assert.deepEqual(validateAdapter(adapter), { ok: true, errors: [] });
+  assert.deepEqual(validateAdapter({ ...adapter, records_path: 'x' }).errors, ['records_path must be "$" when access.kind is "csv"']);
+});
+
+test('json-api and html still cannot be replaced; csv can be registered as before', () => {
+  assert.doesNotThrow(() => validateKindsOption({ csv: { parse() {} } }));
+  for (const name of ['json-api', 'html']) {
+    assert.throws(() => validateKindsOption({ [name]: { parse() {} } }),
+      (err) => err.code === 'E_OPTIONS' && err.message === `kinds.${name} shadows a built-in kind`);
+  }
+});
+
+test('a caller kind named csv wins over the built-in', () => {
+  const calls = [];
+  const custom = { parse(input) { calls.push(input); return []; } };
+  const resolved = resolveKind('csv', { csv: custom });
+  assert.notEqual(resolved, csvKind);
+  resolved.parse({ bytes: Buffer.alloc(0) });
+  assert.equal(calls.length, 1);
+  assert.equal(resolveKind('html', { html: custom }).name, 'html');
+});
+
+test('runIngest stores csv rows with the built-in kind', async () => {
+  await withPaths(async (paths) => {
+    const fetchImpl = csvResponse('id,name\na1,"Ada, L."\nb2,Bo\n');
+    const { report } = await runIngest({ adapter, paths, fetchImpl, now: new Date('2026-10-20T00:00:00Z') });
+    assert.equal(report.outcome, 'ok', JSON.stringify(report.failure ?? report.errors));
+    const records = await readRecords(paths.storeFile);
+    assert.deepEqual(records.map((r) => [r.fields.source_id, r.fields.name, r.source_url]), [
+      ['a1', 'Ada, L.', 'https://example.test/item/a1'],
+      ['b2', 'Bo', 'https://example.test/item/b2'],
+    ]);
+    assert.deepEqual(records[0].raw, { id: 'a1', name: 'Ada, L.' });
+  });
+});
+
+test('runIngest uses a registered csv kind instead of the built-in, as on 0.7', async () => {
+  await withPaths(async (paths) => {
+    const custom = { parse: () => [{ id: 'mine', name: 'from the caller kind' }] };
+    const fetchImpl = csvResponse('id,name\na1,Ada\n');
+    const { report } = await runIngest({ adapter, paths, fetchImpl, kinds: { csv: custom }, now: new Date('2026-10-20T00:00:00Z') });
+    assert.equal(report.outcome, 'ok');
+    const records = await readRecords(paths.storeFile);
+    assert.deepEqual(records.map((r) => r.fields.source_id), ['mine']);
+  });
+});
+
+test('a broken csv body fails the run with E_PARSE and the line number', async () => {
+  await withPaths(async (paths) => {
+    const fetchImpl = csvResponse('id,name\na1,"open\n');
+    await assert.rejects(runIngest({ adapter, paths, fetchImpl, now: new Date('2026-10-20T00:00:00Z') }), (err) => {
+      assert.equal(err.code, 'E_PARSE');
+      assert.equal(err.message, 'csv line 2: a quoted value is never closed');
+      return true;
+    });
+  });
+});
+
+test('max_records is enforced while parsing', async () => {
+  await withPaths(async (paths) => {
+    const fetchImpl = csvResponse('id,name\na,1\nb,2\nc,3\n');
+    const small = { ...adapter, fetch: { max_records: 2 } };
+    await assert.rejects(runIngest({ adapter: small, paths, fetchImpl, now: new Date('2026-10-20T00:00:00Z') }),
+      (err) => err.code === 'E_RECORD_LIMIT');
+  });
+});
+
+test('a malformed registration named csv is not replaced by the built-in', () => {
+  assert.equal(resolveKind('csv', { csv: { parse: 'nope' } }), null);
+  assert.equal(resolveKind('csv', { other: { parse() {} } }), csvKind);
+  assert.equal(validateAdapter(adapter, { kinds: { csv: { parse: 'nope' } } }).ok, false);
 });

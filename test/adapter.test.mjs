@@ -239,7 +239,7 @@ test('an unknown kind names itself, the supported kinds, and the two ways out', 
   const r = validateAdapter({ ...base, access: { ...base.access, kind: 'rss' } });
   assert.equal(r.ok, false);
   assert.ok(r.errors.includes(
-    'access.kind "rss" is not supported by this engine (html, json-api); it may need a newer version or a registered kind'),
+    'access.kind "rss" is not supported by this engine (csv, html, json-api); it may need a newer version or a registered kind'),
   r.errors.join(' | '));
 });
 

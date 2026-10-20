@@ -136,14 +136,15 @@
             {
               "enum": [
                 "json-api",
-                "html"
+                "html",
+                "csv"
               ]
             },
             {
               "type": "string"
             }
           ],
-          "description": "How the body becomes records: \"json-api\", \"html\" (needs the optional cheerio peer), or the name of a kind you register with the kinds option."
+          "description": "How the body becomes records: \"json-api\", \"html\" (needs the optional cheerio peer), \"csv\" (since 0.8; a header row, one record per row), or the name of a kind you register with the kinds option."
         },
         "url": {
           "type": "string",
