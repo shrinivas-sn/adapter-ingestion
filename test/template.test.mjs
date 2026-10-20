@@ -201,3 +201,25 @@ test('runIngest stores a templated url end to end', async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+// ---- Review fix: the host must stay literal however the URL parser reads it ----
+
+const HOST_LITERAL = 'must keep the scheme and host literal (no placeholder before the first "/", "?" or "#" after "://")';
+for (const template of ['https:///{p}', ' https://{p}/x', 'https:\\{p}/x', 'http:{p}', '\thttps://{p}', 'https://h.test{p}/x']) {
+  test(`parseTemplate: ${JSON.stringify(template)} cannot let a value choose the host`, () => {
+    assert.deepEqual(parseTemplate(template), { ok: false, error: HOST_LITERAL });
+  });
+}
+
+test('parseTemplate: a placeholder in the port is rejected', () => {
+  assert.equal(parseTemplate('https://h.test:{port}/x').ok, false);
+});
+
+test('parseTemplate: odd but literal hosts are URL templates, so values are encoded', () => {
+  for (const template of [' https://h.test/{p}', 'https:\\h.test/{p}', 'https:///h.test/{p}']) {
+    const r = parseTemplate(template);
+    assert.equal(r.ok, true, template);
+    assert.equal(r.isUrl, true, template);
+    assert.equal(new URL(renderTemplate(r.parts, r.isUrl, { p: 'a b/c?d' })).host, 'h.test');
+  }
+});

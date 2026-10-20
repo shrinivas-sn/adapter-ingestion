@@ -59,24 +59,42 @@ export function parseTemplate(template) {
     i = end + 1;
   }
 
-  const isUrl = URL_TEMPLATE_RE.test(template);
-  if (isUrl) {
-    // The scheme and host are literal, so no value can change which site
-    // the link points to.
-    const afterScheme = template.slice(template.indexOf('://') + 3);
-    const authority = afterScheme.split(/[/?#]/, 1)[0];
-    if (authority.includes('{')) {
+  // The URL parser decides what a link is, not a pattern: it trims spaces,
+  // reads "\" as "/" and skips extra slashes, so "https:///{p}" would put
+  // the value in the host. Fill the template two ways; if it is a link
+  // either way, both must point at the same scheme and host, so no value
+  // can change which site the link points to.
+  const a = httpUrl(fill(parts, 'a'));
+  const b = httpUrl(fill(parts, 'b'));
+  if (a !== null || b !== null) {
+    if (a === null || b === null || a.protocol !== b.protocol || a.host !== b.host) {
       return { ok: false, error: 'must keep the scheme and host literal (no placeholder before the first "/", "?" or "#" after "://")' };
     }
-    const sample = parts.map((p) => ('text' in p ? p.text : 'x')).join('');
-    try {
-      // eslint-disable-next-line no-new -- the URL parser is the authority on what parses.
-      new URL(sample);
-    } catch {
-      return { ok: false, error: 'must be an http(s) URL once filled in' };
-    }
+    return { ok: true, parts, isUrl: true };
   }
-  return { ok: true, parts, isUrl };
+  if (URL_TEMPLATE_RE.test(template.trim())) {
+    return { ok: false, error: 'must be an http(s) URL once filled in' };
+  }
+  return { ok: true, parts, isUrl: false };
+}
+
+/**
+ * @param {Array<{ text: string } | { path: string }>} parts
+ * @param {string} value
+ */
+function fill(parts, value) {
+  return parts.map((p) => ('text' in p ? p.text : value)).join('');
+}
+
+/** @param {string} s @returns {URL | null} */
+function httpUrl(s) {
+  let u;
+  try {
+    u = new URL(s);
+  } catch {
+    return null;
+  }
+  return u.protocol === 'http:' || u.protocol === 'https:' ? u : null;
 }
 
 /**
