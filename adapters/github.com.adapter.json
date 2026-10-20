@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "host": "github.com",
+  "access": { "tier": 0, "kind": "feed", "url": "https://github.com/nodejs/node/releases.atom" },
+  "fetch": {
+    "headers": { "User-Agent": "adapter-ingestion-recipe/1.0" }
+  },
+  "map": {
+    "source_id": { "path": "id" },
+    "url":       { "path": "url" },
+    "title":     { "path": "title",   "normalize": "text" },
+    "author":    { "path": "author",  "normalize": "text" },
+    "updated":   { "path": "updated", "normalize": "iso-datetime" }
+  },
+  "required": ["source_id", "url", "title", "updated"],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.4,
+    "required_field_ratio": 0.9,
+    "max_staleness_days": 45,
+    "staleness_field": "updated"
+  }
+}

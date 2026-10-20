@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "host": "wordpress.org",
+  "access": { "tier": 0, "kind": "feed", "url": "https://wordpress.org/news/feed/" },
+  "fetch": {
+    "headers": { "User-Agent": "adapter-ingestion-recipe/1.0" }
+  },
+  "map": {
+    "source_id":  { "path": "id" },
+    "url":        { "path": "url" },
+    "title":      { "path": "title",     "normalize": "text" },
+    "summary":    { "path": "summary",   "normalize": "text" },
+    "author":     { "path": "author",    "normalize": "text" },
+    "categories": { "path": "categories" },
+    "published":  { "path": "published", "normalize": "iso-datetime" }
+  },
+  "required": ["source_id", "url", "title", "published"],
+  "canary": {
+    "min_records": 1,
+    "median_window": 5,
+    "count_drop_ratio": 0.4,
+    "required_field_ratio": 0.9,
+    "max_staleness_days": 60,
+    "staleness_field": "published"
+  }
+}
