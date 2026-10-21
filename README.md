@@ -367,7 +367,7 @@ Every key the engine reads (since 0.10 listed here in full). "Safe integer" mean
 | `host` | lower-case bare hostname, at most 253 characters; required | none | — |
 | `access` | object (below); required | none | — |
 | `fetch` | object (below) | all defaults | — |
-| `records_path` | `"$"` or dot segments; must be `"$"` for `csv`, `feed` and html `select` | `"$"` | — |
+| `records_path` | `"$"` or dot segments; must be `"$"` for the built-in `csv` and `feed` kinds and html `select` | `"$"` | — |
 | `map` | object: field name → map rule (below); `source_id` and `url` required | none | — |
 | `required` | array of unique mapped field names | none | — |
 | `canary` | object (below) | all defaults | — |

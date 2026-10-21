@@ -121,38 +121,6 @@
       "if": {
         "type": "object",
         "required": [
-          "access"
-        ],
-        "properties": {
-          "access": {
-            "type": "object",
-            "required": [
-              "kind"
-            ],
-            "properties": {
-              "kind": {
-                "enum": [
-                  "csv",
-                  "feed"
-                ]
-              }
-            }
-          }
-        }
-      },
-      "then": {
-        "type": "object",
-        "properties": {
-          "records_path": {
-            "const": "$"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "type": "object",
-        "required": [
           "access",
           "html"
         ],

@@ -62,6 +62,17 @@ test('schema: csv and feed adapters without records_path, or with "$", pass both
   }
 });
 
+test('schema: a registered csv or feed kind may set records_path, as the engine allows', () => {
+  // A kind you register under a built-in name added later (csv 0.8, feed 0.9) replaces it,
+  // and the schema cannot see registered kinds.
+  const kinds = { csv: { parse: () => [] }, feed: { parse: () => [] } };
+  for (const kind of ['csv', 'feed']) {
+    const adapter = { ...base, access: { ...base.access, kind }, records_path: 'rows' };
+    assert.equal(validateSchema(adapter), true, `${kind}: ${JSON.stringify(validateSchema.errors)}`);
+    assert.equal(validateAdapter(adapter, { kinds }).ok, true, kind);
+  }
+});
+
 const INVALID = {
   'unknown access key': { ...base, access: { ...base.access, kindd: 'x' } },
   'unknown fetch key': { ...base, fetch: { timeout: 5 } },
@@ -81,8 +92,6 @@ const INVALID = {
   'upper-case host': { ...base, host: 'Example.test', access: { ...base.access, url: 'https://example.test/api' } },
   'max_records above safe integer': { ...base, fetch: { max_records: 1e20 } },
   'min_records above safe integer': { ...base, canary: { min_records: 1e20 } },
-  'csv with records_path': { ...base, access: { ...base.access, kind: 'csv' }, records_path: 'rows' },
-  'feed with records_path': { ...base, access: { ...base.access, kind: 'feed' }, records_path: 'items' },
   'html select with records_path': { ...htmlBase, records_path: 'x' },
 };
 

@@ -39,7 +39,7 @@ After bumping, read `notices` in the first run report, or run
   passed validation.
 - `explain` knows the four `W_*` warning codes.
 - The JSON Schema accepts `HTTPS://` URLs, and flags an upper-case `host`, numbers above
-  2^53 and `records_path` on `csv`, `feed` and html `select` adapters, as the engine does.
+  2^53 − 1 and `records_path` on html `select` adapters, as the engine does.
 - README has full adapter key and run report references.
 
 ### Opt in
