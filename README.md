@@ -67,8 +67,8 @@ types), `schema/` (the adapter JSON Schema), this README, `AGENTS.md`, `llms.txt
 `NOTES-generalization.md`. No adapters, fixtures or scripts. You bring your own adapter JSON
 and run it with `runIngest` from your own code, or with the `adapter-ingestion` command.
 
-The core has no runtime dependencies. For `access.kind: "html"`, also install the optional
-peer once: `npm install cheerio`. JSON-only users never need it.
+The core has no runtime dependencies. For `access.kind: "html"` or `"feed"`, also install the optional
+peer once: `npm install cheerio`. JSON and CSV users never need it.
 
 ## Quick start
 
@@ -162,8 +162,9 @@ The package installs an `adapter-ingestion` command (since 0.4). Run it with `np
 |---|---|---|
 | `adapter-ingestion validate <adapter.json>` | Checks an adapter offline and lists every error | none |
 | `adapter-ingestion run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]` | Runs one ingestion. Defaults: `store/<host>.jsonl`, `runs/<host>` | the adapter's source only |
-| `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `A_*` or `D_*` code | none |
+| `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `W_*`, `A_*` or `D_*` code | none |
 | `adapter-ingestion doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]` | Validates, checks Node and the optional `cheerio` peer, and lists notices. `--check-updates` asks the npm registry for the latest version | none, unless `--check-updates` |
+| `adapter-ingestion --version` | Prints the installed version (since 0.10) | none |
 
 Every command takes `--json` and then prints exactly one JSON object on stdout:
 
@@ -176,15 +177,16 @@ Every command takes `--json` and then prints exactly one JSON object on stdout:
 
 Exit codes: `0` ok; `1` a stale run, an operational error or an abort; `2` a usage or
 configuration problem (bad arguments, an invalid adapter, an unsupported Node version, an
-html adapter without `cheerio`, or an unset `fetch.headers` environment variable). Without `--json`, `run` prints a summary on stdout and
+html or feed adapter without `cheerio`, or an unset `fetch.headers` environment variable). Without `--json`, `run` prints a summary on stdout and
 notices and failures on stderr. These commands, flags, keys and exit codes are part of the
 public surface ([VERSIONING.md](VERSIONING.md)). The older `node src/run.mjs <adapter.json>`
 entry point still works unchanged.
 
 ## API
 
-Every function below has a stable input/output/error contract. `error.code` is always one
-of the `E_*` constants named per function.
+Every function below has a stable input/output/error contract. A thrown error is an
+`IngestionError` whose `code` is an `E_*` code; `npx adapter-ingestion explain E_FETCH`
+explains any code.
 
 TypeScript types ship with the package (since 0.4): each subpath resolves its own `.d.mts`
 through `exports`, generated from the source's JSDoc, so editors and agents see real
@@ -206,9 +208,9 @@ The package itself is still plain JavaScript with no runtime dependencies.
   commit (see [Canary history on CI](#canary-history-on-ci)); it must differ from
   `paths.storeFile`. `report.notices` lists advice and deprecations for this adapter (see
   [Reading a run report](#reading-a-run-report)).
-- Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a registered kind threw),
-  `E_PARSE_NO_MATCH` (`html.script` matched nothing), `E_KIND_DEPENDENCY` (`html` without
-  `cheerio` installed).
+- Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a `csv` or `feed` body that
+  cannot be read, or a registered kind threw), `E_PARSE_NO_MATCH` (`html.script` matched
+  nothing), `E_KIND_DEPENDENCY` (`html` or `feed` without `cheerio` installed).
 
 **`/adapter`**
 - `validateAdapter(adapter, { kinds }?)` → `{ ok: boolean, errors: string[] }`. Never
@@ -219,6 +221,8 @@ The package itself is still plain JavaScript with no runtime dependencies.
 **`/store`**
 - `readRecords(filePath, { maxLineBytes, onWarning }?)` → `Promise<Record[]>` — every
   historical revision, in file order. A missing file resolves to `[]`, never throws.
+- `iterateRecords(filePath, { maxLineBytes, onWarning }?)` → `AsyncGenerator<Record>` — every
+  revision, in file order, one at a time: for stores too big for `readRecords`.
 - `readLatestRecords(filePath, options?)` → `Promise<Record[]>` — last-write-wins per ID.
 - `readIndex(filePath, options?)` → `Promise<Map<id, content_hash>>`.
 - `appendRecords(filePath, records, { maxLineBytes }?)` → `Promise<number>` (count
@@ -233,10 +237,13 @@ The package itself is still plain JavaScript with no runtime dependencies.
 - `applyFilter(records, filterDef, now = new Date())` → `{ kept, dropped }`. Throws
   `E_FILTER_INVALID` on an invalid filter — validate once with `validateFilter` if you want
   to fail before this point instead.
+- `evaluateRule(record, rule, now = new Date())` → `boolean` for one rule. Throws
+  `E_FILTER_INVALID` on an invalid rule.
 
 **`/fetch`**
 - `fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds }?)` → `Promise<{ items,
   pages, statuses, diagnostics }>`. `fetchImpl` must resolve with a real `Response`.
+- `buildUrl(adapter, { page, since }?)` → the request URL (a string) for that page.
 
 **`/canary`**
 - `checkCanary(report, history, cfg, { now = new Date() }?)` → `{ status: 'ok'|'stale',
@@ -254,6 +261,8 @@ The package itself is still plain JavaScript with no runtime dependencies.
 - `buildRecord({ host, sourceId, sourceUrl, fields, raw, fetchedAt })` → a record (throws
   `E_RECORD_INVALID` on an invalid identity/URL/timestamp/field value).
 - `contentHash(fields)`, `canonicalize(value)`, `isValidSourceId(v)`, `isValidSourceUrl(v)`.
+- `assertNoUndefined(value, rootPath = '$')` — throws `E_RECORD_INVALID` naming the path of
+  the first `undefined` value or non-plain object inside `value`.
 
 **`/extract`**
 - `extractAll(rawItems, adapter, { fetchedAt })` → `{ records, errors, errorCount,
@@ -500,9 +509,10 @@ const tsv = {
 await runIngest({ adapter, paths, kinds: { tsv } });
 ```
 
-`parse` receives `{ bytes, contentType, url, adapter }`. `json-api` and `html` can never be
+`parse` receives `{ bytes, contentType, url, adapter, limits }`, where `limits` is
+`{ maxRecords, remainingRecords }`. `json-api` and `html` can never be
 replaced: registering either name is `E_OPTIONS`. A built-in kind added later (since 0.8:
-`csv`) is used only when you have not registered a kind of that name, so a parser you
+`csv`; since 0.9: `feed`) is used only when you have not registered a kind of that name, so a parser you
 registered as `csv` before 0.8 keeps being used; drop it to switch to the built-in. If
 `parse` throws, the run fails with `E_PARSE` and a generic message: your
 error's text never reaches a report (it stays on `err.cause`). A result that is not the array
@@ -655,8 +665,8 @@ The sections below are about *this* repository's own worked examples, dev toolin
 release process — none of it is required to use the published package.
 
 This repo carries worked-example adapters, each with recorded fixtures (`adapters/`,
-`fixtures/`, `filters/`). They cover a public-domain government feed, a WordPress site's
-JSON endpoint and a public security-advisory API, plus a template `example.adapter.json`.
+`fixtures/`, `filters/`). There are 13: 3 JSON APIs, 7 HTML pages, 1 CSV
+file and 2 feeds (RSS and Atom), plus a template `example.adapter.json`.
 They are **not** part of the npm package — `npm pack`'s file allowlist (`package.json`'s
 `"files"`) ships only the engine, its types and schema, and the docs listed under
 [Install](#install); verified by `scripts/verify-package.mjs` (packs the real tarball,
