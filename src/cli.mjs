@@ -22,6 +22,7 @@ const EXIT_OK = 0;
 const EXIT_OPERATIONAL = 1;
 const EXIT_CONFIG = 2;
 const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID', 'E_HEADER_ENV']);
+const CHEERIO_KINDS = new Set(['html', 'feed']);
 
 const USAGE = `usage: adapter-ingestion <command> [options]
 
@@ -248,7 +249,7 @@ async function doctorCommand({ positionals, values }) {
   const environment = {
     node: process.versions.node,
     node_ok: satisfiesMinimum(process.versions.node, pkg.engines?.node),
-    cheerio: adapter?.access?.kind === 'html' ? cheerioResolves() : null,
+    cheerio: CHEERIO_KINDS.has(adapter?.access?.kind) ? cheerioResolves() : null,
   };
 
   let notices = [];
@@ -271,7 +272,7 @@ async function doctorCommand({ positionals, values }) {
     console.log(`${ok ? 'ok' : 'problems found'}: ${adapterPath}`);
     for (const e of errors) console.log(`  error: ${e}`);
     if (!environment.node_ok) console.log(`  error: Node ${environment.node} is below the supported ${pkg.engines?.node}`);
-    if (environment.cheerio === false) console.log('  error: html adapters need the optional peer: npm install cheerio');
+    if (environment.cheerio === false) console.log('  error: html and feed adapters need the optional peer: npm install cheerio');
     for (const n of notices) console.log(`  notice ${n.code}: ${n.message}`);
     if (out.update) {
       const u = out.update;

@@ -259,6 +259,33 @@ test('bin doctor: an html adapter reports whether cheerio resolves', async (t) =
   assert.equal(JSON.parse(stdout).environment.cheerio, true);
 });
 
+test('bin doctor: a feed adapter reports whether cheerio resolves', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify({
+    version: 1,
+    host: 'wordpress.org',
+    access: { tier: 0, kind: 'feed', url: 'https://wordpress.org/news/feed/' },
+    fetch: { headers: { 'User-Agent': 'adapter-ingestion-recipe/1.0' } },
+    map: {
+      source_id: { path: 'id' },
+      url: { path: 'url' },
+      title: { path: 'title', normalize: 'text' },
+      summary: { path: 'summary', normalize: 'text' },
+      author: { path: 'author', normalize: 'text' },
+      categories: { path: 'categories' },
+      published: { path: 'published', normalize: 'iso-datetime' },
+    },
+    required: ['source_id', 'url', 'title', 'published'],
+    canary: {
+      min_records: 1, median_window: 5, count_drop_ratio: 0.4, required_field_ratio: 0.9,
+      max_staleness_days: 60, staleness_field: 'published',
+    },
+  }));
+  const { stdout } = await runBin(['doctor', 'a.json', '--json'], { cwd });
+  // This repo has cheerio as a devDependency, so it resolves here.
+  assert.equal(JSON.parse(stdout).environment.cheerio, true);
+});
+
 test('bin doctor --check-updates: a newer registry version is "available"', async (t) => {
   const cwd = await disposableCwd(t);
   await writeFile(join(cwd, 'a.json'), JSON.stringify(VALID_ADAPTER));
