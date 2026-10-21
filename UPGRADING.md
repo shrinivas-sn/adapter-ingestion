@@ -28,6 +28,28 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.10 → 0.11
+
+### Free with no changes
+
+- Nothing changes for valid adapters, records, stores or reports.
+- An unknown `fetch.incremental.type` now says it must be `"iso-date"` or `"iso-datetime"`.
+
+### Opt in
+
+- `"fetch": { "incremental": { "param": "modified_after", "type": "iso-datetime" } }` lets
+  `since` be an ISO date-time (`2026-10-19T04:18:47`, `2026-10-19T04:18:47Z`,
+  `2026-10-19T04:18:47+05:30`). It is checked, then sent to the source unchanged. A date
+  alone is rejected for this type.
+- Changing an adapter's `type` changes its fingerprint, so `count_drop_ratio` history for
+  its snapshot runs starts again.
+
+### Action needed
+
+- None for JavaScript.
+- TypeScript only: `fetch.incremental.type` is now `'iso-date' | 'iso-datetime'`; code that
+  assumed only `'iso-date'` may need a check.
+
 ## 0.9 → 0.10
 
 ### Free with no changes

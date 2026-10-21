@@ -161,7 +161,7 @@ The package installs an `adapter-ingestion` command (since 0.4). Run it with `np
 | Command | What it does | Network |
 |---|---|---|
 | `adapter-ingestion validate <adapter.json>` | Checks an adapter offline and lists every error | none |
-| `adapter-ingestion run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]` | Runs one ingestion. Defaults: `store/<host>.jsonl`, `runs/<host>` | the adapter's source only |
+| `adapter-ingestion run <adapter.json> [--since DATE] [--store FILE] [--runs DIR] [--history FILE]` | Runs one ingestion. Defaults: `store/<host>.jsonl`, `runs/<host>` | the adapter's source only |
 | `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `W_*`, `A_*` or `D_*` code | none |
 | `adapter-ingestion doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]` | Validates, checks Node and the optional `cheerio` peer, and lists notices. `--check-updates` asks the npm registry for the latest version | none, unless `--check-updates` |
 | `adapter-ingestion --version` | Prints the installed version (since 0.10) | none |
@@ -199,8 +199,8 @@ The package itself is still plain JavaScript with no runtime dependencies.
   `Promise<{ report, canary }>` on success (including a `stale` canary — that's not a
   failure). Rejects with an `IngestionError` (`err.code`, `err.message`, `err.report`) on a
   config, transport, storage, lock, cancellation, or reporting failure. `paths.storeFile`/
-  `paths.runsDir` are required nonempty strings. `since` (a `YYYY-MM-DD` string) switches to
-  incremental mode and requires `adapter.fetch.incremental` to be configured. `signal` (an
+  `paths.runsDir` are required nonempty strings. `since` (a `YYYY-MM-DD` string, or an ISO date-time when
+  `fetch.incremental.type` is `"iso-datetime"`) switches to incremental mode and requires `adapter.fetch.incremental` to be configured. `signal` (an
   `AbortSignal`) cancels an in-flight fetch/wait; a cancellation that lands after the store
   append already committed does not roll back that commit. `kinds` registers your own
   formats (see [Source kinds](#source-kinds)); a malformed one is `E_OPTIONS`.
@@ -415,7 +415,11 @@ Any other top-level key is your own metadata (start it with `_`).
 | Key | Type and range | Default | Since |
 |---|---|---|---|
 | `param` | nonempty string; must not equal a pagination parameter; required | none | — |
-| `type` | `"iso-date"` only; required | none | — |
+| `type` | `"iso-date"` (`since` is `YYYY-MM-DD`) or `"iso-datetime"` (`since` is a date-time such as `2026-10-19T04:18:47` or `2026-10-19T04:18:47Z`, sent unchanged); required | none | `iso-datetime`: 0.11 |
+
+Use `iso-datetime` when the source wants a time too (WordPress REST `after` and
+`modified_after` reject a date alone). The engine checks the form and never converts the
+value: the source decides what a missing zone means.
 
 **`fetch.retry`**
 
@@ -825,7 +829,7 @@ They are **not** part of the npm package — `npm pack`'s file allowlist (`packa
 installs it into a disposable consumer, runs a consumer script that imports only the
 installed package, type-checks a TypeScript consumer, and runs the installed bin). The
 published command is `adapter-ingestion` (see [Command line](#command-line)). The older
-entry point `node src/run.mjs <adapter.json> [--since YYYY-MM-DD]` still works —
+entry point `node src/run.mjs <adapter.json> [--since DATE]` still works —
 running `node src/run.mjs adapters/<HOST>.adapter.json` writes `runs/<HOST>/report-*.json`
 and exits non-zero on a stale canary or failure (exit codes: `0` ok, `1` stale/operational
 error/aborted, `2` usage/configuration).

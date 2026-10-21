@@ -37,6 +37,9 @@ Each source is described by an **adapter**: a JSON file, not code.
 - Use `"normalize": "iso-datetime"` (since 0.7) to keep the time of day; `iso-date` keeps
   only the day. A time with no zone gives `null` unless the rule has `"assume_zone": "Z"`;
   add that only when the source documents its times as UTC.
+- A source whose incremental parameter wants a time (WordPress REST `modified_after`, GitHub
+  `since`): `"incremental": { "param": "modified_after", "type": "iso-datetime" }` (since
+  0.11), then `--since 2026-10-19T04:18:47`. The value is sent unchanged.
 - `access.url` must be on `host` (or a subdomain of it).
 - `map.source_id` and `map.url` are always required.
 - No URL or id field in the source? Build one with `{ "template": "https://example.org/item/{id}" }`
