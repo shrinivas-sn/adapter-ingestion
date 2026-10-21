@@ -204,7 +204,7 @@ On 0.x, `^0.3.0` never moves to 0.4.0 by itself.
 
 ## Codes
 
-Every `E_*` error, `A_*` advice and `D_*` deprecation code. For details:
+Every `E_*` error, `W_*` warning, `A_*` advice and `D_*` deprecation code. For details:
 `npx adapter-ingestion explain <CODE>`.
 
 <!-- codes:start -->
@@ -241,4 +241,8 @@ Every `E_*` error, `A_*` advice and `D_*` deprecation code. For details:
 | `E_STORE_WRITE` | error | Records could not be appended to the store. | Check the store directory. The report's storage.status says whether the batch may have partly landed. |
 | `E_TIMEOUT` | error | One request took longer than fetch.timeout_ms. | Raise fetch.timeout_ms. Timeouts are retried when fetch.retry allows it. |
 | `E_TOTAL_BYTES_LIMIT` | error | All responses together exceeded fetch.max_total_bytes. | Raise fetch.max_total_bytes, or lower max_pages. |
+| `W_HISTORY_CORRUPT_LINE` | warning | A line in the history file could not be read, so the canary skipped it. | Nothing to do for one run. If it repeats, remove the broken line from the history file; it otherwise stays until it ages out. |
+| `W_PAGE_LIMIT` | warning | Pagination stopped at fetch.pagination.max_pages while pages were still full, because allow_truncation is true. | Expected with allow_truncation. Raise max_pages if you need every page. |
+| `W_STORE_CORRUPT_LINE` | warning | A store line is not a JSON object, so it was skipped when reading the store. | Records on other lines are unaffected. Remove or repair the line once no run is active. |
+| `W_STORE_INVALID_RECORD` | warning | A store line is a JSON object without a nonempty id or content_hash, so it was skipped. | Remove or repair the line once no run is active; only this package should append to the store. |
 <!-- codes:end -->

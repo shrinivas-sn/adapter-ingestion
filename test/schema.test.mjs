@@ -46,6 +46,33 @@ test('schema: an adapter with $schema passes both', () => {
   assert.equal(validateAdapter(adapter).ok, true);
 });
 
+test('schema: an upper-case URL scheme passes both', () => {
+  const adapter = { ...base, access: { ...base.access, url: 'HTTPS://example.test/api' } };
+  assert.equal(validateSchema(adapter), true, JSON.stringify(validateSchema.errors));
+  assert.equal(validateAdapter(adapter).ok, true);
+});
+
+test('schema: csv and feed adapters without records_path, or with "$", pass both', () => {
+  for (const kind of ['csv', 'feed']) {
+    const withoutPath = { ...base, access: { ...base.access, kind } };
+    for (const adapter of [withoutPath, { ...withoutPath, records_path: '$' }]) {
+      assert.equal(validateSchema(adapter), true, `${kind}: ${JSON.stringify(validateSchema.errors)}`);
+      assert.equal(validateAdapter(adapter).ok, true, kind);
+    }
+  }
+});
+
+test('schema: a registered csv or feed kind may set records_path, as the engine allows', () => {
+  // A kind you register under a built-in name added later (csv 0.8, feed 0.9) replaces it,
+  // and the schema cannot see registered kinds.
+  const kinds = { csv: { parse: () => [] }, feed: { parse: () => [] } };
+  for (const kind of ['csv', 'feed']) {
+    const adapter = { ...base, access: { ...base.access, kind }, records_path: 'rows' };
+    assert.equal(validateSchema(adapter), true, `${kind}: ${JSON.stringify(validateSchema.errors)}`);
+    assert.equal(validateAdapter(adapter, { kinds }).ok, true, kind);
+  }
+});
+
 const INVALID = {
   'unknown access key': { ...base, access: { ...base.access, kindd: 'x' } },
   'unknown fetch key': { ...base, fetch: { timeout: 5 } },
@@ -62,6 +89,10 @@ const INVALID = {
   'unknown html field key': { ...htmlBase, html: { ...htmlBase.html, fields: { id: { attribute: 'id' } } } },
   'select html with script': { ...htmlBase, html: { ...htmlBase.html, script: 'x' } },
   'staleness_field without max_staleness_days': { ...base, map: { ...base.map, d: { path: 'd' } }, canary: { staleness_field: 'd' } },
+  'upper-case host': { ...base, host: 'Example.test', access: { ...base.access, url: 'https://example.test/api' } },
+  'max_records above safe integer': { ...base, fetch: { max_records: 1e20 } },
+  'min_records above safe integer': { ...base, canary: { min_records: 1e20 } },
+  'html select with records_path': { ...htmlBase, records_path: 'x' },
 };
 
 for (const [name, adapter] of Object.entries(INVALID)) {

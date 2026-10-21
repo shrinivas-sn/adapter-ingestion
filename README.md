@@ -67,8 +67,8 @@ types), `schema/` (the adapter JSON Schema), this README, `AGENTS.md`, `llms.txt
 `NOTES-generalization.md`. No adapters, fixtures or scripts. You bring your own adapter JSON
 and run it with `runIngest` from your own code, or with the `adapter-ingestion` command.
 
-The core has no runtime dependencies. For `access.kind: "html"`, also install the optional
-peer once: `npm install cheerio`. JSON-only users never need it.
+The core has no runtime dependencies. For `access.kind: "html"` or `"feed"`, also install the optional
+peer once: `npm install cheerio`. JSON and CSV users never need it.
 
 ## Quick start
 
@@ -162,8 +162,9 @@ The package installs an `adapter-ingestion` command (since 0.4). Run it with `np
 |---|---|---|
 | `adapter-ingestion validate <adapter.json>` | Checks an adapter offline and lists every error | none |
 | `adapter-ingestion run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]` | Runs one ingestion. Defaults: `store/<host>.jsonl`, `runs/<host>` | the adapter's source only |
-| `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `A_*` or `D_*` code | none |
+| `adapter-ingestion explain <CODE>` | Meaning, likely cause and fix for any `E_*`, `W_*`, `A_*` or `D_*` code | none |
 | `adapter-ingestion doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]` | Validates, checks Node and the optional `cheerio` peer, and lists notices. `--check-updates` asks the npm registry for the latest version | none, unless `--check-updates` |
+| `adapter-ingestion --version` | Prints the installed version (since 0.10) | none |
 
 Every command takes `--json` and then prints exactly one JSON object on stdout:
 
@@ -176,15 +177,16 @@ Every command takes `--json` and then prints exactly one JSON object on stdout:
 
 Exit codes: `0` ok; `1` a stale run, an operational error or an abort; `2` a usage or
 configuration problem (bad arguments, an invalid adapter, an unsupported Node version, an
-html adapter without `cheerio`, or an unset `fetch.headers` environment variable). Without `--json`, `run` prints a summary on stdout and
+html or feed adapter without `cheerio`, or an unset `fetch.headers` environment variable). Without `--json`, `run` prints a summary on stdout and
 notices and failures on stderr. These commands, flags, keys and exit codes are part of the
 public surface ([VERSIONING.md](VERSIONING.md)). The older `node src/run.mjs <adapter.json>`
 entry point still works unchanged.
 
 ## API
 
-Every function below has a stable input/output/error contract. `error.code` is always one
-of the `E_*` constants named per function.
+Every function below has a stable input/output/error contract. A thrown error is an
+`IngestionError` whose `code` is an `E_*` code; `npx adapter-ingestion explain E_FETCH`
+explains any code.
 
 TypeScript types ship with the package (since 0.4): each subpath resolves its own `.d.mts`
 through `exports`, generated from the source's JSDoc, so editors and agents see real
@@ -206,9 +208,9 @@ The package itself is still plain JavaScript with no runtime dependencies.
   commit (see [Canary history on CI](#canary-history-on-ci)); it must differ from
   `paths.storeFile`. `report.notices` lists advice and deprecations for this adapter (see
   [Reading a run report](#reading-a-run-report)).
-- Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a registered kind threw),
-  `E_PARSE_NO_MATCH` (`html.script` matched nothing), `E_KIND_DEPENDENCY` (`html` without
-  `cheerio` installed).
+- Parse errors: `E_RESPONSE_JSON` (invalid JSON), `E_PARSE` (a `csv` or `feed` body that
+  cannot be read, or a registered kind threw), `E_PARSE_NO_MATCH` (`html.script` matched
+  nothing), `E_KIND_DEPENDENCY` (`html` or `feed` without `cheerio` installed).
 
 **`/adapter`**
 - `validateAdapter(adapter, { kinds }?)` → `{ ok: boolean, errors: string[] }`. Never
@@ -219,6 +221,8 @@ The package itself is still plain JavaScript with no runtime dependencies.
 **`/store`**
 - `readRecords(filePath, { maxLineBytes, onWarning }?)` → `Promise<Record[]>` — every
   historical revision, in file order. A missing file resolves to `[]`, never throws.
+- `iterateRecords(filePath, { maxLineBytes, onWarning }?)` → `AsyncGenerator<Record>` — every
+  revision, in file order, one at a time: for stores too big for `readRecords`.
 - `readLatestRecords(filePath, options?)` → `Promise<Record[]>` — last-write-wins per ID.
 - `readIndex(filePath, options?)` → `Promise<Map<id, content_hash>>`.
 - `appendRecords(filePath, records, { maxLineBytes }?)` → `Promise<number>` (count
@@ -233,17 +237,20 @@ The package itself is still plain JavaScript with no runtime dependencies.
 - `applyFilter(records, filterDef, now = new Date())` → `{ kept, dropped }`. Throws
   `E_FILTER_INVALID` on an invalid filter — validate once with `validateFilter` if you want
   to fail before this point instead.
+- `evaluateRule(record, rule, now = new Date())` → `boolean` for one rule. Throws
+  `E_FILTER_INVALID` on an invalid rule.
 
 **`/fetch`**
 - `fetchAll(adapter, { since, fetchImpl = fetch, signal, kinds }?)` → `Promise<{ items,
   pages, statuses, diagnostics }>`. `fetchImpl` must resolve with a real `Response`.
+- `buildUrl(adapter, { page, since }?)` → the request URL (a string) for that page.
 
 **`/canary`**
 - `checkCanary(report, history, cfg, { now = new Date() }?)` → `{ status: 'ok'|'stale',
   breaches: string[], skipped: [{check, reason}] }`.
 
 **`/report`**
-- `buildReport({ ... })` → the v2 report object (see MIGRATION-0.2.md for the full shape).
+- `buildReport({ ... })` → the v2 report object (see [Run report reference](#run-report-reference)).
 - `writeReport(dir, report)` → `Promise<string>` (the written file's path). Publishes
   atomically (temp file + rename); a crash mid-write never leaves a half-written report at
   the final name.
@@ -254,6 +261,8 @@ The package itself is still plain JavaScript with no runtime dependencies.
 - `buildRecord({ host, sourceId, sourceUrl, fields, raw, fetchedAt })` → a record (throws
   `E_RECORD_INVALID` on an invalid identity/URL/timestamp/field value).
 - `contentHash(fields)`, `canonicalize(value)`, `isValidSourceId(v)`, `isValidSourceUrl(v)`.
+- `assertNoUndefined(value, rootPath = '$')` — throws `E_RECORD_INVALID` naming the path of
+  the first `undefined` value or non-plain object inside `value`.
 
 **`/extract`**
 - `extractAll(rawItems, adapter, { fetchedAt })` → `{ records, errors, errorCount,
@@ -278,7 +287,7 @@ that ships with the package (since 0.4). Either the installed copy, which works 
 ```
 
 or a version-pinned URL:
-`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.9.0/schema/adapter.schema.json`.
+`https://unpkg.com/@shrinivas-sn/adapter-ingestion@0.10.0/schema/adapter.schema.json`.
 The schema is also importable as `@shrinivas-sn/adapter-ingestion/adapter.schema.json`. It
 helps while writing; `validateAdapter` (or `npx adapter-ingestion validate`) stays the
 authority, because some rules (selector compilation, cross-field checks) cannot be expressed
@@ -343,6 +352,101 @@ value into a reference changes it once, so `count_drop_ratio` starts a new histo
 `fetch.pagination` (optional): `{ style: 'page-param', param, per_page?, per_page_param?,
 max_pages?, allow_truncation? }`. Hitting `max_pages` on a still-full-looking page is a
 hard failure unless `allow_truncation: true`.
+
+### Adapter key reference
+
+Every key the engine reads (since 0.10 listed here in full). "Safe integer" means at most
+2^53 − 1. `—` in **Since** means 0.2 or earlier.
+
+**Top level**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `$schema` | string; editor support only, ignored by the engine | none | 0.4 |
+| `version` | `1`; required | none | — |
+| `host` | lower-case bare hostname, at most 253 characters; required | none | — |
+| `access` | object (below); required | none | — |
+| `fetch` | object (below) | all defaults | — |
+| `records_path` | `"$"` or dot segments; must be `"$"` for the built-in `csv` and `feed` kinds and html `select` | `"$"` | — |
+| `map` | object: field name → map rule (below); `source_id` and `url` required | none | — |
+| `required` | array of unique mapped field names | none | — |
+| `canary` | object (below) | all defaults | — |
+| `html` | object; required with `access.kind: "html"`, not allowed otherwise. See [Source kinds](#source-kinds) | none | 0.3 |
+
+Any other top-level key is your own metadata (start it with `_`).
+
+**`access`**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `tier` | integer 0–5; required | none | — |
+| `kind` | `"json-api"`, `"html"` (0.3), `"csv"` (0.8), `"feed"` (0.9), or a kind you register; required | none | — |
+| `url` | `http(s)` URL, no credentials, on `host` or a subdomain of it; required | none | — |
+
+**`fetch`**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `method` | `"GET"` only | `"GET"` | — |
+| `headers` | header name → string, or `{ "env": "NAME", "optional"?: true }`: `env` names the environment variable; `optional` `true` sends no header when it is unset | none | env refs 0.6 |
+| `timeout_ms` | integer 1–2147483647; one request | 30000 | — |
+| `max_duration_ms` | integer 1–2147483647; the whole fetch, retries included | 120000 | — |
+| `max_records` | positive safe integer | 5000 | — |
+| `max_response_bytes` | positive safe integer; one response | 20000000 (`html`, `feed`: 5000000) | — |
+| `max_total_bytes` | positive safe integer; all responses together | 100000000 | — |
+| `delay_ms` | integer 0–2147483647; wait between pages | 0 | — |
+| `pagination` | object (below) | one page | — |
+| `incremental` | object (below); needed for `since` | none | — |
+| `retry` | object (below) | all defaults | — |
+
+**`fetch.pagination`**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `style` | `"page-param"` only; required | none | — |
+| `param` | nonempty string: the page-number query parameter; required | none | — |
+| `max_pages` | positive safe integer | 1 | — |
+| `per_page` | positive safe integer; a shorter page ends pagination | none | — |
+| `per_page_param` | string; needs `per_page`, must differ from `param` | none | — |
+| `allow_truncation` | boolean; `true` turns hitting `max_pages` into `W_PAGE_LIMIT` instead of `E_PAGE_LIMIT` | `false` | — |
+
+**`fetch.incremental`**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `param` | nonempty string; must not equal a pagination parameter; required | none | — |
+| `type` | `"iso-date"` only; required | none | — |
+
+**`fetch.retry`**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `max_attempts` | integer 1–5 | 3 | — |
+| `backoff_ms` | integer 0–60000 | 500 | — |
+| `max_delay_ms` | integer 0–60000, at least `backoff_ms` | 10000 | — |
+
+**`map` rule**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `path` | dot-path into the raw item (`"$"` = the item); required unless `template` is set | none | — |
+| `template` | string with `{name}` placeholders; not with `path`, `normalize` or `assume_zone` | none | 0.8 |
+| `normalize` | `"text"`, `"number"`, `"iso-date"`, `"iso-datetime"` (0.7), `"bool"` | none | — |
+| `assume_zone` | `"Z"`; only with `iso-datetime` | none | 0.7 |
+
+**`canary`**
+
+| Key | Type and range | Default | Since |
+|---|---|---|---|
+| `min_records` | nonnegative safe integer | 1 | — |
+| `required_field_ratio` | number 0–1 | 0.9 | — |
+| `median_window` | integer 1–100 | 5 | — |
+| `count_drop_ratio` | number 0–1 | 0.4 | — |
+| `max_staleness_days` | number above 0; set with `staleness_field` | none | — |
+| `staleness_field` | a field name in `map`; set with `max_staleness_days` | none | — |
+
+These checks run with their defaults even when the adapter has no `canary` block; staleness
+runs only when both `max_staleness_days` and `staleness_field` are set.
 
 ## Source kinds
 
@@ -500,9 +604,10 @@ const tsv = {
 await runIngest({ adapter, paths, kinds: { tsv } });
 ```
 
-`parse` receives `{ bytes, contentType, url, adapter }`. `json-api` and `html` can never be
+`parse` receives `{ bytes, contentType, url, adapter, limits }`, where `limits` is
+`{ maxRecords, remainingRecords }`. `json-api` and `html` can never be
 replaced: registering either name is `E_OPTIONS`. A built-in kind added later (since 0.8:
-`csv`) is used only when you have not registered a kind of that name, so a parser you
+`csv`; since 0.9: `feed`) is used only when you have not registered a kind of that name, so a parser you
 registered as `csv` before 0.8 keeps being used; drop it to switch to the built-in. If
 `parse` throws, the run fails with `E_PARSE` and a generic message: your
 error's text never reaches a report (it stays on `err.cause`). A result that is not the array
@@ -528,7 +633,7 @@ unchanged,written}` explain the numbers; `error_count`/`errors` (capped at 20 sa
 `warning_count`/`warnings` cover rejected records and store-corruption/pagination-truncation
 notices respectively. `canary.breaches` names which threshold tripped
 (`min_records`/`required_field_ratio`/`count_drop_ratio`/`staleness`) when
-`canary.status === "stale"`. Full v2 schema: [MIGRATION-0.2.md](MIGRATION-0.2.md).
+`canary.status === "stale"`. Every key and value: [Run report reference](#run-report-reference).
 
 `notices` (since 0.4) is a list of advice (`A_*`) and deprecations (`D_*`) about this
 adapter: what this engine version offers it, and anything it uses that will be removed.
@@ -561,6 +666,63 @@ Each line holds one finished run's `report_version`, `run_id`, `host`,
 errors, URLs or headers). The file keeps the newest `max(50, 2 × median_window)` lines and
 is rewritten atomically under the store lock. With `historyFile` set, the canary reads
 history only from it. A run that fails validation or cannot take the lock adds no line.
+
+### Run report reference
+
+Every top-level key of a report (since 0.10 listed here in full). New keys and values may
+be added in a minor version; code that reads reports must ignore ones it does not know.
+
+| Key | Type | Meaning |
+|---|---|---|
+| `report_version` | `2` | Report format version. |
+| `run_id` | string | Unique id of this run; also in the report's file name. |
+| `adapter_fingerprint` | string or `null` | Hash of the adapter's settings; `count_drop_ratio` compares only runs with the same one. `null` when the adapter failed validation. |
+| `mode` | `"snapshot"` or `"incremental"` | `incremental` when the run had `since`. |
+| `outcome` | string | `"ok"`, `"stale"` (completed, canary tripped), `"error"` or `"aborted"`. |
+| `host` | string or `null` | The adapter's `host`; `null` when the adapter has none. |
+| `started_at`, `finished_at` | string | ISO timestamps. |
+| `duration_ms` | number | `finished_at` minus `started_at`. |
+| `stages` | object | `{ fetched, parsed, fresh, changed, unchanged, written }` counts; `written` is `null` when `storage.status` is `uncertain`. |
+| `error_count` | number | How many items were rejected (the true total). |
+| `errors` | array | Up to 20 rejected-item samples (below). |
+| `fatal_error` | string or `null` | Same text as `failure.message`, kept for older readers. |
+| `failure` | object or `null` | `{ code, message, stage, details? }` when `outcome` is `error` or `aborted`; otherwise `null`. |
+| `secondary_errors` | array | Always `[]` in reports `runIngest` writes. A failure that happens alongside the main one (`stage` `report` or `lock_release`) is attached to the thrown error's `details.secondary_errors`. |
+| `warnings` | array | Up to 20 warnings (below). |
+| `warning_count` | number | The true number of warnings. |
+| `newest_staleness_value` | any or `null` | Newest `canary.staleness_field` value in this run; `null` when staleness is not configured or no value is a date. |
+| `canary` | object | `{ status, breaches, skipped }` (below). |
+| `fetch` | object | `{ pages, attempts, retries, statuses, status_count, bytes, complete, stop_reason }`; `statuses` keeps the first 20 HTTP statuses, `status_count` counts all. |
+| `storage` | object | `{ status, written }` (below). |
+| `notices` | array | Advice and deprecations (see [Reading a run report](#reading-a-run-report)). |
+
+Allowed values:
+
+- `outcome`: `ok`, `stale`, `error`, `aborted`.
+- `failure.stage`: `validate`, `fetch`, `extract`, `store`, `canary`, `lock`,
+  `lock_release`. `run --json` can also print `options` when the options were rejected
+  before any report was built.
+- `details.secondary_errors[].stage` (on the thrown error): `report`, `lock_release`.
+- `storage.status`: `not_started` (the run stopped before the store step), `unchanged`
+  (nothing new to write), `committed` (`written` records appended), `uncertain` (an append
+  failed part way, so `written` is `null`: the batch may have partly landed).
+- `fetch.stop_reason`: `single_page` (no pagination), `empty_page`, `short_page`,
+  `max_pages`, or `null` when the fetch did not finish.
+- `canary.status`: `ok`, `stale`, `not_evaluated` (the run did not get that far).
+- `canary.skipped[]`: `{ check, reason }`; `check` is `min_records`,
+  `required_field_ratio`, `count_drop_ratio` or `staleness`; `reason` is
+  `incremental_batch`, `empty_batch`, `no_history` or `not_configured`.
+- `canary.breaches[]`: strings `"<check>: <detail>"`, for example `"staleness: newest …"`.
+- `errors[]`: `{ index, code, missing, invalid, source_id, source_url }`; `missing` and
+  `invalid` list field names.
+- `warnings[]`: `{ code, message?, line? }`, where `code` is one of:
+  - `W_PAGE_LIMIT`: pagination stopped at `max_pages` while pages were still full, because
+    `allow_truncation` is `true`.
+  - `W_STORE_CORRUPT_LINE`: a store line is not a JSON object, so it was skipped.
+  - `W_STORE_INVALID_RECORD`: a store line has no nonempty `id` or `content_hash`, so it was
+    skipped.
+  - `W_HISTORY_CORRUPT_LINE`: a history file line could not be read, so the canary skipped
+    it.
 
 ## Gotchas
 
@@ -655,8 +817,8 @@ The sections below are about *this* repository's own worked examples, dev toolin
 release process — none of it is required to use the published package.
 
 This repo carries worked-example adapters, each with recorded fixtures (`adapters/`,
-`fixtures/`, `filters/`). They cover a public-domain government feed, a WordPress site's
-JSON endpoint and a public security-advisory API, plus a template `example.adapter.json`.
+`fixtures/`, `filters/`). There are 13: 3 JSON APIs, 7 HTML pages, 1 CSV
+file and 2 feeds (RSS and Atom), plus a template `example.adapter.json`.
 They are **not** part of the npm package — `npm pack`'s file allowlist (`package.json`'s
 `"files"`) ships only the engine, its types and schema, and the docs listed under
 [Install](#install); verified by `scripts/verify-package.mjs` (packs the real tarball,

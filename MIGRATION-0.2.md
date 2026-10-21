@@ -62,6 +62,8 @@ success.
 
 ## Report shape — v2
 
+The current, complete shape is in the README's [Run report reference](README.md#run-report-reference).
+
 Every report is now `report_version: 2` (previously an informal ad hoc shape). New/changed
 top-level fields: `run_id`, `adapter_fingerprint`, `mode` (`"snapshot"` or `"incremental"`),
 `outcome` (`"ok"` / `"stale"` / `"error"` / `"aborted"`), `failure` (`{ code, message,

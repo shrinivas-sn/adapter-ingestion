@@ -22,6 +22,7 @@ const EXIT_OK = 0;
 const EXIT_OPERATIONAL = 1;
 const EXIT_CONFIG = 2;
 const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID', 'E_HEADER_ENV']);
+const CHEERIO_KINDS = new Set(['html', 'feed']);
 
 const USAGE = `usage: adapter-ingestion <command> [options]
 
@@ -29,10 +30,11 @@ commands:
   validate <adapter.json>   check an adapter offline; lists every error
   run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]
                             ingest once; defaults: store/<host>.jsonl, runs/<host>
-  explain <CODE>            what an E_*, A_* or D_* code means, and the fix
+  explain <CODE>            what an E_*, W_*, A_* or D_* code means, and the fix
   doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]
                             validate, check the environment, list notices;
                             --check-updates asks the npm registry for the latest version
+  --version                 print the installed version
 
 every command accepts --json: one JSON object on stdout, nothing else`;
 
@@ -247,7 +249,7 @@ async function doctorCommand({ positionals, values }) {
   const environment = {
     node: process.versions.node,
     node_ok: satisfiesMinimum(process.versions.node, pkg.engines?.node),
-    cheerio: adapter?.access?.kind === 'html' ? cheerioResolves() : null,
+    cheerio: CHEERIO_KINDS.has(adapter?.access?.kind) ? cheerioResolves() : null,
   };
 
   let notices = [];
@@ -270,7 +272,7 @@ async function doctorCommand({ positionals, values }) {
     console.log(`${ok ? 'ok' : 'problems found'}: ${adapterPath}`);
     for (const e of errors) console.log(`  error: ${e}`);
     if (!environment.node_ok) console.log(`  error: Node ${environment.node} is below the supported ${pkg.engines?.node}`);
-    if (environment.cheerio === false) console.log('  error: html adapters need the optional peer: npm install cheerio');
+    if (environment.cheerio === false) console.log('  error: html and feed adapters need the optional peer: npm install cheerio');
     for (const n of notices) console.log(`  notice ${n.code}: ${n.message}`);
     if (out.update) {
       const u = out.update;
@@ -302,6 +304,11 @@ export async function main(argv) {
   const wantsJson = rest.includes('--json');
   if (name === '--help' || name === '-h' || name === 'help') {
     console.log(USAGE);
+    return EXIT_OK;
+  }
+  if (name === '--version' || name === '-v') {
+    const { version } = await ownPackage();
+    console.log(wantsJson ? JSON.stringify({ version }) : version);
     return EXIT_OK;
   }
   if (name === undefined) {

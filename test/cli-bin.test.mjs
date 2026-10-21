@@ -17,6 +17,16 @@ test('bin: --help prints usage and exits 0', async () => {
   assert.match(stdout, /usage: adapter-ingestion/);
 });
 
+test('bin --version prints the package version', async () => {
+  const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const text = await runBin(['--version']);
+  assert.equal(text.code, 0);
+  assert.equal(text.stdout.trim(), version);
+  const json = await runBin(['--version', '--json']);
+  assert.equal(json.code, 0);
+  assert.equal(json.stdout.trim(), JSON.stringify({ version }));
+});
+
 test('bin: an unknown command exits 2, as JSON with --json', async () => {
   const text = await runBin(['frobnicate']);
   assert.equal(text.code, 2);
@@ -84,6 +94,14 @@ test('bin explain: a known code prints meaning, cause and fix', async () => {
   const advice = await runBin(['explain', 'A_CANARY_NO_HISTORY']);
   assert.equal(advice.code, 0);
   assert.match(advice.stdout, /^A_CANARY_NO_HISTORY \(advice\)\nmeaning: /);
+});
+
+test('bin explain: a W_* code is explained', async () => {
+  const json = await runBin(['explain', 'W_PAGE_LIMIT', '--json']);
+  assert.equal(json.code, 0);
+  const out = JSON.parse(json.stdout);
+  assert.deepEqual(Object.keys(out), ['code', 'kind', 'meaning', 'cause', 'fix']);
+  assert.equal(out.kind, 'warning');
 });
 
 test('bin explain: an unknown code exits 2', async () => {
@@ -235,6 +253,33 @@ test('bin doctor: an html adapter reports whether cheerio resolves', async (t) =
     ...VALID_ADAPTER, access: { tier: 2, kind: 'html', url: 'https://example.test/list' },
     html: { mode: 'select', rows: 'tr', fields: { id: { attr: 'id' }, link: { selector: 'a', attr: 'href' }, title: { selector: 'a' } } },
     map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title' } },
+  }));
+  const { stdout } = await runBin(['doctor', 'a.json', '--json'], { cwd });
+  // This repo has cheerio as a devDependency, so it resolves here.
+  assert.equal(JSON.parse(stdout).environment.cheerio, true);
+});
+
+test('bin doctor: a feed adapter reports whether cheerio resolves', async (t) => {
+  const cwd = await disposableCwd(t);
+  await writeFile(join(cwd, 'a.json'), JSON.stringify({
+    version: 1,
+    host: 'wordpress.org',
+    access: { tier: 0, kind: 'feed', url: 'https://wordpress.org/news/feed/' },
+    fetch: { headers: { 'User-Agent': 'adapter-ingestion-recipe/1.0' } },
+    map: {
+      source_id: { path: 'id' },
+      url: { path: 'url' },
+      title: { path: 'title', normalize: 'text' },
+      summary: { path: 'summary', normalize: 'text' },
+      author: { path: 'author', normalize: 'text' },
+      categories: { path: 'categories' },
+      published: { path: 'published', normalize: 'iso-datetime' },
+    },
+    required: ['source_id', 'url', 'title', 'published'],
+    canary: {
+      min_records: 1, median_window: 5, count_drop_ratio: 0.4, required_field_ratio: 0.9,
+      max_staleness_days: 60, staleness_field: 'published',
+    },
   }));
   const { stdout } = await runBin(['doctor', 'a.json', '--json'], { cwd });
   // This repo has cheerio as a devDependency, so it resolves here.

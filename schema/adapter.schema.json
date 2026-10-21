@@ -23,8 +23,8 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 253,
-      "pattern": "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$",
-      "description": "The exact hostname of access.url (keep a leading www. if the URL has it). access.url must be on this host or a subdomain. It names store/<host>.jsonl, runs/<host>/ and every record id (<host>:<source_id>), so changing it later starts a new store."
+      "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$",
+      "description": "The exact hostname of access.url (keep a leading www. if the URL has it). Lower case. access.url must be on this host or a subdomain. It names store/<host>.jsonl, runs/<host>/ and every record id (<host>:<source_id>), so changing it later starts a new store."
     },
     "access": {
       "$ref": "#/$defs/access"
@@ -75,45 +75,90 @@
       "$ref": "#/$defs/html"
     }
   },
-  "if": {
-    "type": "object",
-    "required": [
-      "access"
-    ],
-    "properties": {
-      "access": {
+  "allOf": [
+    {
+      "if": {
         "type": "object",
         "required": [
-          "kind"
+          "access"
         ],
         "properties": {
-          "kind": {
-            "const": "html"
+          "access": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "html"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "required": [
+          "html"
+        ],
+        "properties": {
+          "html": true
+        }
+      },
+      "else": {
+        "not": {
+          "type": "object",
+          "required": [
+            "html"
+          ],
+          "properties": {
+            "html": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": [
+          "access",
+          "html"
+        ],
+        "properties": {
+          "access": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "const": "html"
+              }
+            }
+          },
+          "html": {
+            "type": "object",
+            "required": [
+              "mode"
+            ],
+            "properties": {
+              "mode": {
+                "const": "select"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "records_path": {
+            "const": "$"
           }
         }
       }
     }
-  },
-  "then": {
-    "type": "object",
-    "required": [
-      "html"
-    ],
-    "properties": {
-      "html": true
-    }
-  },
-  "else": {
-    "not": {
-      "type": "object",
-      "required": [
-        "html"
-      ],
-      "properties": {
-        "html": true
-      }
-    }
-  },
+  ],
   "$defs": {
     "access": {
       "type": "object",
@@ -149,8 +194,8 @@
         },
         "url": {
           "type": "string",
-          "pattern": "^https?://",
-          "description": "The http(s) URL to fetch. No credentials in the URL."
+          "pattern": "^[Hh][Tt][Tt][Pp][Ss]?://",
+          "description": "The http(s) URL to fetch (any letter case). No credentials in the URL."
         }
       }
     },
@@ -191,16 +236,19 @@
         "max_records": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 9007199254740991,
           "description": "Fail if the fetch produces more records than this."
         },
         "max_response_bytes": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 9007199254740991,
           "description": "Cap for one response body."
         },
         "max_total_bytes": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 9007199254740991,
           "description": "Cap for all response bodies together."
         },
         "delay_ms": {
@@ -240,11 +288,13 @@
         "max_pages": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 9007199254740991,
           "description": "Stop after this many pages."
         },
         "per_page": {
           "type": "integer",
           "minimum": 1,
+          "maximum": 9007199254740991,
           "description": "Expected page size; a shorter page ends pagination."
         },
         "per_page_param": {
@@ -398,6 +448,7 @@
         "min_records": {
           "type": "integer",
           "minimum": 0,
+          "maximum": 9007199254740991,
           "description": "A snapshot run with fewer parsed records is stale."
         },
         "median_window": {

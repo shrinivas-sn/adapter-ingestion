@@ -13,11 +13,17 @@ on purpose, with a changeset that announces it.
 | Exported names, per package subpath (`.`, `./adapter`, `./report`, ...) | `test/contract-freeze.test.mjs` (EXPORTS) |
 | `E_*` error codes | `test/contract-freeze.test.mjs` (ERROR_CODES) |
 | `A_*` advice and `D_*` deprecation notice codes | `test/contract-freeze.test.mjs` (NOTICE_CODES) |
+| `W_*` warning codes | `test/contract-freeze.test.mjs` (WARNING_CODES) |
 | Run report top-level keys and `report_version` | `test/contract-freeze.test.mjs` (REPORT_KEYS) |
+| Report string values (`failure.stage`, `storage.status`, `fetch.stop_reason`, `canary.skipped[].reason`) | `test/contract-freeze.test.mjs` (value sets) |
 | Store record keys | `test/contract-freeze.test.mjs` (RECORD_KEYS) |
 | Adapter shape (`version: 1`) and `adapter.schema.json` | repo-adapter and schema tests |
 | CLI commands, flags, exit codes and `--json` keys | CLI contract tests |
 | Supported Node versions (`engines.node`) | the CI matrix |
+| TypeScript types (`types/*.d.mts`) | `scripts/verify-package.mjs` (TypeScript consumer) |
+
+Types follow the same rules: a minor may add optional properties or union members; a type
+is narrowed only to match what the code already does.
 
 Anything not listed (internal modules under `src/` that are not package subpaths, the
 wording of error messages, the layout of files in `runs/`) may change in any release.

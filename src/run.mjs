@@ -19,6 +19,11 @@ import { IngestionError, safeFailure, addSecondaryError } from './errors.mjs';
 // Type-only re-exports for TypeScript users (no runtime export): the shapes
 // of runIngest's options and result, and the documents it reads and writes.
 /** @typedef {import('./types.mjs').Adapter} Adapter */
+/** @typedef {import('./types.mjs').AdapterFetch} AdapterFetch */
+/** @typedef {import('./types.mjs').AdapterCanary} AdapterCanary */
+/** @typedef {import('./types.mjs').AdapterHtml} AdapterHtml */
+/** @typedef {import('./types.mjs').MapRule} MapRule */
+/** @typedef {import('./types.mjs').HeaderRef} HeaderRef */
 /** @typedef {import('./types.mjs').Kind} Kind */
 /** @typedef {import('./types.mjs').RunPaths} RunPaths */
 /** @typedef {import('./types.mjs').RunIngestOptions} RunIngestOptions */

@@ -7,7 +7,7 @@ npm package `@shrinivas-sn/adapter-ingestion`: plain JavaScript (ES modules) wit
 ## Docs
 
 - [AGENTS.md](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/AGENTS.md): task recipes for coding agents and the full code table
-- [README](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/README.md): API, adapter keys, source kinds, run reports, gotchas
+- [README](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/README.md): API, adapter key reference, source kinds, run report reference, gotchas
 - [Adapter JSON Schema](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/schema/adapter.schema.json): every adapter key with a description
 - [VERSIONING.md](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/VERSIONING.md): what each release may change; deprecation policy
 - [UPGRADING.md](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/UPGRADING.md): what each minor version adds, and what to change
@@ -15,5 +15,5 @@ npm package `@shrinivas-sn/adapter-ingestion`: plain JavaScript (ES modules) wit
 ## Optional
 
 - [CHANGELOG](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/CHANGELOG.md): every release
-- [MIGRATION-0.2.md](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/MIGRATION-0.2.md): the 0.1 to 0.2 migration and the full v2 report shape
+- [MIGRATION-0.2.md](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/MIGRATION-0.2.md): the 0.1 to 0.2 migration
 - [NOTES-generalization.md](https://github.com/shrinivas-sn/adapter-ingestion/blob/main/NOTES-generalization.md): design notes
