@@ -208,6 +208,33 @@ test('O03: an incremental run isolates the final writeReport failure specificall
   await rm(dir, { recursive: true, force: true });
 });
 
+test('runIngest: iso-datetime since reaches the request and the run is incremental', async () => {
+  const dtAdapter = { ...adapter, fetch: { ...adapter.fetch, incremental: { param: 'modified_after', type: 'iso-datetime' } } };
+  const { dir, paths } = await tmpPaths();
+  const seen = [];
+  const fetchImpl = async (url) => { seen.push(new URL(url).searchParams.get('modified_after')); return impl(items)(); };
+  const { report } = await runIngest({ adapter: dtAdapter, paths, fetchImpl, since: '2026-10-19T04:18:47', now: new Date() });
+  assert.equal(report.mode, 'incremental');
+  assert.equal(report.outcome, 'ok');
+  assert.ok(seen.length > 0);
+  assert.deepEqual(seen, seen.map(() => '2026-10-19T04:18:47'));
+  await rm(dir, { recursive: true, force: true });
+});
+
+test('runIngest: a date-only since with iso-datetime fails validation before fetching', async () => {
+  const dtAdapter = { ...adapter, fetch: { ...adapter.fetch, incremental: { param: 'modified_after', type: 'iso-datetime' } } };
+  const { dir, paths } = await tmpPaths();
+  let calls = 0;
+  const fetchImpl = async () => { calls++; return impl(items)(); };
+  const err = await runIngest({ adapter: dtAdapter, paths, fetchImpl, since: '2026-10-19', now: new Date() })
+    .then(() => assert.fail('expected E_ADAPTER_INVALID'), (e) => e);
+  assert.equal(err.code, 'E_ADAPTER_INVALID');
+  assert.equal(err.report.outcome, 'error');
+  assert.equal(err.report.failure.stage, 'validate');
+  assert.equal(calls, 0);
+  await rm(dir, { recursive: true, force: true });
+});
+
 // --- 5.2: a lock-release failure after an otherwise-successful run ---
 
 test('a lock-release failure after a successful run updates the persisted report to error, preserving committed storage', async () => {

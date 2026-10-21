@@ -319,11 +319,14 @@
         "param": {
           "type": "string",
           "minLength": 1,
-          "description": "Query parameter that carries the since date."
+          "description": "Query parameter that carries the since value."
         },
         "type": {
-          "const": "iso-date",
-          "description": "The since value is a YYYY-MM-DD date."
+          "enum": [
+            "iso-date",
+            "iso-datetime"
+          ],
+          "description": "iso-date: since is YYYY-MM-DD. iso-datetime (since 0.11): since is an ISO date-time, sent unchanged."
         }
       }
     },

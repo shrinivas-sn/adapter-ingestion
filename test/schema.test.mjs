@@ -62,6 +62,12 @@ test('schema: csv and feed adapters without records_path, or with "$", pass both
   }
 });
 
+test('schema: an iso-datetime incremental type passes both', () => {
+  const adapter = { ...base, fetch: { incremental: { param: 'modified_after', type: 'iso-datetime' } } };
+  assert.equal(validateSchema(adapter), true, JSON.stringify(validateSchema.errors));
+  assert.equal(validateAdapter(adapter).ok, true);
+});
+
 test('schema: a registered csv or feed kind may set records_path, as the engine allows', () => {
   // A kind you register under a built-in name added later (csv 0.8, feed 0.9) replaces it,
   // and the schema cannot see registered kinds.
@@ -78,6 +84,7 @@ const INVALID = {
   'unknown fetch key': { ...base, fetch: { timeout: 5 } },
   'unknown pagination key': { ...base, fetch: { pagination: { style: 'page-param', param: 'p', maxpages: 2 } } },
   'unknown incremental key': { ...base, fetch: { incremental: { param: 's', type: 'iso-date', extra: 1 } } },
+  'unknown incremental type': { ...base, fetch: { incremental: { param: 's', type: 'iso-time' } } },
   'unknown retry key': { ...base, fetch: { retry: { attempts: 2 } } },
   'unknown map rule key': { ...base, map: { ...base.map, title: { path: 't', normalise: 'text' } } },
   'unknown canary key': { ...base, canary: { min_record: 1 } },

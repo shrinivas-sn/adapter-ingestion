@@ -28,7 +28,7 @@ const USAGE = `usage: adapter-ingestion <command> [options]
 
 commands:
   validate <adapter.json>   check an adapter offline; lists every error
-  run <adapter.json> [--since YYYY-MM-DD] [--store FILE] [--runs DIR] [--history FILE]
+  run <adapter.json> [--since DATE] [--store FILE] [--runs DIR] [--history FILE]
                             ingest once; defaults: store/<host>.jsonl, runs/<host>
   explain <CODE>            what an E_*, W_*, A_* or D_* code means, and the fix
   doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]
