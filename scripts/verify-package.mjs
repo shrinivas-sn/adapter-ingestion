@@ -173,7 +173,7 @@ console.log(JSON.stringify({ ok: true, checks: ['html-with-peer'] }));
 `;
 
 const CONSUMER_TYPES_SCRIPT = String.raw`
-import { runIngest, type RunIngestOptions, type Report } from '@shrinivas-sn/adapter-ingestion';
+import { runIngest, type RunIngestOptions, type Report, type Adapter } from '@shrinivas-sn/adapter-ingestion';
 import { validateAdapter } from '@shrinivas-sn/adapter-ingestion/adapter';
 import { buildReport } from '@shrinivas-sn/adapter-ingestion/report';
 
@@ -191,12 +191,39 @@ const options: RunIngestOptions = {
   paths: { storeFile: 'store.jsonl', runsDir: 'runs', historyFile: 'history.jsonl' },
 };
 
+const tier: number = 1;
+const full: Adapter = {
+  version: 1, host: 'example.test',
+  access: { tier, kind: 'csv', url: 'https://example.test/items.csv' },
+  fetch: {
+    headers: { Authorization: { env: 'TOKEN', optional: true }, Accept: 'text/csv' },
+    pagination: { style: 'page-param', param: 'page', max_pages: 3, per_page: 50 },
+    retry: { max_attempts: 2, backoff_ms: 100 },
+    incremental: { param: 'since', type: 'iso-date' },
+  },
+  map: { source_id: { template: '{region}:{year}' }, url: { template: 'https://example.test/{region}' } },
+  canary: { min_records: 1, median_window: 5, count_drop_ratio: 0.4 },
+};
+const withMeta: Adapter = { ...full, _notes: 'x' };
+const badFetch: Adapter = {
+  ...full,
+  // @ts-expect-error unknown fetch key
+  fetch: { timeout: 5 },
+};
+const badRule: Adapter = {
+  ...full,
+  // @ts-expect-error unknown normalizer
+  map: { source_id: { path: 'id', normalize: 'date' }, url: { path: 'link' } },
+};
+
 export async function go() {
   const { report: r } = await runIngest(options);
   const outcome: 'ok' | 'stale' | 'error' | 'aborted' = r.outcome;
+  const stage: 'validate' | 'fetch' | 'extract' | 'store' | 'canary' | 'lock' | 'lock_release' | 'options' | undefined = r.failure?.stage;
+  const sr: 'single_page' | 'empty_page' | 'short_page' | 'max_pages' | null = r.fetch.stop_reason;
   // @ts-expect-error storeFile must be a string
   await runIngest({ ...options, paths: { storeFile: 1, runsDir: 'runs' } });
-  return [checked, version, codes, outcome];
+  return [checked, version, codes, outcome, stage, sr, withMeta, badFetch, badRule];
 }
 `;
 

@@ -3,24 +3,84 @@
 // type with: @typedef {import('./types.mjs').Report} Report
 
 /**
- * One source's adapter (see schema/adapter.schema.json for every key).
- * @typedef {object} Adapter
+ * A fetch header value read from an environment variable (since 0.6).
+ * @typedef {object} HeaderRef
+ * @property {string} env
+ * @property {boolean} [optional]
+ */
+
+/**
+ * @typedef {object} AdapterPagination
+ * @property {'page-param'} style
+ * @property {string} param
+ * @property {number} [max_pages]
+ * @property {number} [per_page]
+ * @property {string} [per_page_param]
+ * @property {boolean} [allow_truncation]
+ */
+
+/**
+ * The adapter's fetch section.
+ * @typedef {object} AdapterFetch
+ * @property {'GET'} [method]
+ * @property {Record<string, string | HeaderRef>} [headers]
+ * @property {number} [timeout_ms]
+ * @property {number} [max_duration_ms]
+ * @property {number} [max_records]
+ * @property {number} [max_response_bytes]
+ * @property {number} [max_total_bytes]
+ * @property {number} [delay_ms]
+ * @property {AdapterPagination} [pagination]
+ * @property {{ param: string, type: 'iso-date' }} [incremental]
+ * @property {{ max_attempts?: number, backoff_ms?: number, max_delay_ms?: number }} [retry]
+ */
+
+/**
+ * One map rule: where an output field comes from.
+ * @typedef {{ path?: string, template?: string, normalize?: 'text'|'number'|'iso-date'|'iso-datetime'|'bool', assume_zone?: 'Z' }} MapRule
+ */
+
+/**
+ * The adapter's canary section.
+ * @typedef {object} AdapterCanary
+ * @property {number} [min_records]
+ * @property {number} [required_field_ratio]
+ * @property {number} [median_window]
+ * @property {number} [count_drop_ratio]
+ * @property {number} [max_staleness_days]
+ * @property {string} [staleness_field]
+ */
+
+/**
+ * The adapter's html section (access.kind "html").
+ * @typedef {{ mode: 'select', rows: string, fields: Record<string, { selector?: string, attr?: string, resolve_url?: boolean }> } | { mode: 'script_json', script: string }} AdapterHtml
+ */
+
+/**
+ * @typedef {object} AdapterCore
+ * @property {string} [$schema]
  * @property {1} version
  * @property {string} host
  * @property {{ tier: number, kind: string, url: string }} access
- * @property {Record<string, any>} [fetch]
+ * @property {AdapterFetch} [fetch]
  * @property {string} [records_path]
- * @property {Record<string, { path?: string, template?: string, normalize?: 'text'|'number'|'iso-date'|'iso-datetime'|'bool', assume_zone?: 'Z' }>} map
+ * @property {Record<string, MapRule>} map
  * @property {string[]} [required]
- * @property {Record<string, any>} [canary]
- * @property {Record<string, any>} [html]
+ * @property {AdapterCanary} [canary]
+ * @property {AdapterHtml} [html]
+ */
+
+/**
+ * One source's adapter (see schema/adapter.schema.json for every key). Other
+ * top-level keys are your own metadata, as the engine allows.
+ * @typedef {AdapterCore & Record<string, unknown>} Adapter
  */
 
 /**
  * A source kind: turns a response body into records.
  * @typedef {object} Kind
  * @property {string} [name]
- * @property {(input: { bytes: Buffer, contentType: string|null, url: string, adapter: Adapter, limits?: any }) => any} parse
+ * @property {(input: { bytes: Buffer, contentType: string|null, url: string, adapter: Adapter, limits?: { maxRecords: number, remainingRecords: number } }) => any} parse
  * @property {(adapter: Adapter, need: (cond: any, message: string) => void) => void} [validate]
  * @property {{ max_response_bytes?: number }} [defaults]
  */
@@ -60,7 +120,13 @@
  * @typedef {object} CanaryResult
  * @property {'ok'|'stale'|'not_evaluated'} status
  * @property {string[]} breaches
- * @property {{ check: string, reason: string }[]} skipped
+ * @property {{ check: 'min_records'|'required_field_ratio'|'count_drop_ratio'|'staleness', reason: 'incremental_batch'|'empty_batch'|'no_history'|'not_configured' }[]} skipped
+ */
+
+/**
+ * Where a run failed: a report's failure.stage, or "options" in `run --json`
+ * when the options were rejected before any report.
+ * @typedef {'validate'|'fetch'|'extract'|'store'|'canary'|'lock'|'lock_release'|'options'} FailureStage
  */
 
 /**
@@ -87,16 +153,16 @@
  * @property {number} duration_ms
  * @property {Stages} stages
  * @property {number} error_count
- * @property {any[]} errors
+ * @property {{ index: number, code: string, missing: string[], invalid: string[], source_id: any, source_url: any }[]} errors
  * @property {string|null} fatal_error
- * @property {{ code: string, message: string, stage: string, details?: any }|null} failure
- * @property {any[]} secondary_errors
- * @property {any[]} warnings
+ * @property {{ code: string, message: string, stage: FailureStage, details?: any }|null} failure
+ * @property {{ code: string, message: string, stage: string, details?: any }[]} secondary_errors
+ * @property {{ code: 'W_PAGE_LIMIT'|'W_STORE_CORRUPT_LINE'|'W_STORE_INVALID_RECORD'|'W_HISTORY_CORRUPT_LINE', message?: string, line?: number }[]} warnings
  * @property {number} warning_count
  * @property {any} newest_staleness_value
  * @property {CanaryResult} canary
- * @property {{ pages: number, attempts: number, retries: number, statuses: number[], status_count: number, bytes: number, complete: boolean, stop_reason: string|null }} fetch
- * @property {{ status: string, written: number|null }} storage
+ * @property {{ pages: number, attempts: number, retries: number, statuses: number[], status_count: number, bytes: number, complete: boolean, stop_reason: 'single_page'|'empty_page'|'short_page'|'max_pages'|null }} fetch
+ * @property {{ status: 'not_started'|'unchanged'|'committed'|'uncertain', written: number|null }} storage
  * @property {Notice[]} notices
  */
 
