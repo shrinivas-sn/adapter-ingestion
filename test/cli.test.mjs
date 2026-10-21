@@ -175,6 +175,36 @@ test('CLI: --since is honored for an adapter that configures incremental fetch',
   assert.equal(report.mode, 'incremental', 'the report must reflect that --since actually switched the run to incremental mode');
 });
 
+test('CLI: --since accepts a date-time for an iso-datetime adapter', async (t) => {
+  const cwd = await disposableCwd(t);
+  const seen = [];
+  const { origin, close } = await startServer({
+    '/data': (req, res) => {
+      seen.push(new URL(req.url, 'http://x').searchParams.get('since'));
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify([{ id: 1, link: 'https://example.test/1', title: 'One' }]));
+    },
+  });
+  t.after(close);
+
+  const adapter = {
+    version: 1, host: '127.0.0.1',
+    access: { tier: 0, kind: 'json-api', url: `${origin}/data` },
+    fetch: { method: 'GET', incremental: { param: 'since', type: 'iso-datetime' } },
+    records_path: '$',
+    map: { source_id: { path: 'id' }, url: { path: 'link' }, title: { path: 'title', normalize: 'text' } },
+    required: ['source_id', 'url', 'title'],
+  };
+  await writeFile(join(cwd, 'adapter.json'), JSON.stringify(adapter), 'utf8');
+
+  const { code, stdout } = await runCli(['adapter.json', '--since', '2026-10-19T04:18:47Z'], cwd);
+  assert.equal(code, 0, stdout);
+  assert.deepEqual(seen, ['2026-10-19T04:18:47Z']);
+  const reportFiles = await readdir(join(cwd, 'runs', '127.0.0.1'));
+  const report = JSON.parse(await readFile(join(cwd, 'runs', '127.0.0.1', reportFiles[0]), 'utf8'));
+  assert.equal(report.mode, 'incremental');
+});
+
 // --- Importing as a library must never trigger CLI side effects ---
 
 test('CLI: importing run.mjs as a library (not executing it directly) writes nothing and never exits the process', async (t) => {

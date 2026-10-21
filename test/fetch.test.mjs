@@ -23,6 +23,13 @@ test('buildUrl adds pagination and incremental params', () => {
   assert.equal(u.searchParams.get('after'), '2026-01-01');
 });
 
+test('buildUrl sends a date-time since unchanged', () => {
+  const dt = { ...adapter, fetch: { ...adapter.fetch, incremental: { param: 'after', type: 'iso-datetime' } } };
+  const href = buildUrl(dt, { page: 1, since: '2026-10-01T00:00:00+05:30' });
+  assert.equal(new URL(href).searchParams.get('after'), '2026-10-01T00:00:00+05:30');
+  assert.ok(href.includes('after=2026-10-01T00%3A00%3A00%2B05%3A30'), href);
+});
+
 test('the configured User-Agent is sent on every request', async () => {
   const seen = [];
   const impl = async (url, init) => { seen.push(init.headers['User-Agent']); return jsonResponse([]); };
