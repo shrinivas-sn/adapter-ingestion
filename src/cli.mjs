@@ -33,6 +33,7 @@ commands:
   doctor <adapter.json> [--runs DIR] [--history FILE] [--check-updates]
                             validate, check the environment, list notices;
                             --check-updates asks the npm registry for the latest version
+  --version                 print the installed version
 
 every command accepts --json: one JSON object on stdout, nothing else`;
 
@@ -302,6 +303,11 @@ export async function main(argv) {
   const wantsJson = rest.includes('--json');
   if (name === '--help' || name === '-h' || name === 'help') {
     console.log(USAGE);
+    return EXIT_OK;
+  }
+  if (name === '--version' || name === '-v') {
+    const { version } = await ownPackage();
+    console.log(wantsJson ? JSON.stringify({ version }) : version);
     return EXIT_OK;
   }
   if (name === undefined) {

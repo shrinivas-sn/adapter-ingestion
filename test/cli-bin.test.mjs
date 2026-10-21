@@ -17,6 +17,16 @@ test('bin: --help prints usage and exits 0', async () => {
   assert.match(stdout, /usage: adapter-ingestion/);
 });
 
+test('bin --version prints the package version', async () => {
+  const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const text = await runBin(['--version']);
+  assert.equal(text.code, 0);
+  assert.equal(text.stdout.trim(), version);
+  const json = await runBin(['--version', '--json']);
+  assert.equal(json.code, 0);
+  assert.equal(json.stdout.trim(), JSON.stringify({ version }));
+});
+
 test('bin: an unknown command exits 2, as JSON with --json', async () => {
   const text = await runBin(['frobnicate']);
   assert.equal(text.code, 2);
