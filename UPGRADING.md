@@ -28,6 +28,35 @@ docs for range handling.
 After bumping, read `notices` in the first run report, or run
 `npx adapter-ingestion doctor <adapter.json>`.
 
+## 0.9 → 0.10
+
+### Free with no changes
+
+- Nothing changes for valid adapters, records, stores or reports.
+- `doctor` now checks `cheerio` for `feed` adapters too. It exits 2 when `cheerio` is
+  missing, as `run` already failed for that setup.
+- An upper-case `host` now also says "host must be lower case". Such an adapter never
+  passed validation.
+- `explain` knows the four `W_*` warning codes.
+- The JSON Schema accepts `HTTPS://` URLs, and flags an upper-case `host`, numbers above
+  2^53 and `records_path` on `csv`, `feed` and html `select` adapters, as the engine does.
+- README has full adapter key and run report references.
+
+### Opt in
+
+- `adapter-ingestion --version` prints the installed version (`--json`: `{"version": …}`).
+- New TypeScript type names: `AdapterFetch`, `AdapterCanary`, `AdapterHtml`, `MapRule`,
+  `HeaderRef`.
+
+### Action needed
+
+- None for JavaScript.
+- TypeScript only: report fields such as `failure.stage` and `fetch.stop_reason` are now
+  unions, and adapter sections are typed, so code that compares a field with a value it can
+  never hold, or builds an adapter literal with an unknown key, now fails to compile. Both
+  were already wrong at run time. `html` is now a union on `mode`: check `html.mode` before
+  reading `rows`, `fields` or `script`.
+
 ## 0.8 → 0.9
 
 ### Free with no changes
