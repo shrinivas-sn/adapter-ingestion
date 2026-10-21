@@ -356,7 +356,7 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, kind
   }
 }
 
-// CLI: node src/run.mjs <adapter.json> [--since YYYY-MM-DD]
+// CLI: node src/run.mjs <adapter.json> [--since DATE]
 // import.meta.url is always an absolute file:// URL; process.argv[1] is a
 // plain path that Node does NOT absolutize, and on Windows uses backslashes
 // with no leading slash -- a naive `file://${argv[1]}` comparison never
@@ -368,7 +368,7 @@ export async function runIngest({ adapter, paths, since, fetchImpl, signal, kind
 // 2 usage/configuration (bad options or adapter, or an env header that is not
 // set; nothing was fetched).
 const CONFIG_ERROR_CODES = new Set(['E_OPTIONS', 'E_ADAPTER_INVALID', 'E_HEADER_ENV']);
-const USAGE = 'usage: node src/run.mjs <adapter.json> [--since YYYY-MM-DD]';
+const USAGE = 'usage: node src/run.mjs <adapter.json> [--since DATE]';
 
 // Exactly one positional path plus an optional --since <value>. Everything
 // else (missing path, extra positional, duplicate/valueless --since, any

@@ -31,7 +31,7 @@
  * @property {number} [max_total_bytes]
  * @property {number} [delay_ms]
  * @property {AdapterPagination} [pagination]
- * @property {{ param: string, type: 'iso-date' }} [incremental]
+ * @property {{ param: string, type: 'iso-date'|'iso-datetime' }} [incremental]
  * @property {{ max_attempts?: number, backoff_ms?: number, max_delay_ms?: number }} [retry]
  */
 
@@ -94,7 +94,7 @@
  * @typedef {object} RunIngestOptions
  * @property {Adapter} adapter
  * @property {RunPaths} paths
- * @property {string} [since] YYYY-MM-DD; switches to incremental mode.
+ * @property {string} [since] YYYY-MM-DD, or an ISO date-time when fetch.incremental.type is "iso-datetime" (since 0.11); switches to incremental mode.
  * @property {typeof fetch} [fetchImpl]
  * @property {AbortSignal} [signal]
  * @property {Record<string, Kind>} [kinds] Caller-registered source kinds.
