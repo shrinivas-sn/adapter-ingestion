@@ -53,6 +53,13 @@ const WARNING_CODES = ['W_HISTORY_CORRUPT_LINE', 'W_PAGE_LIMIT', 'W_STORE_CORRUP
 
 const RECORD_KEYS = ['content_hash', 'fetched_at', 'fields', 'id', 'raw', 'source_host', 'source_url'];
 
+// Report string values consumers branch on (since 0.10 pinned). Scanned from src/, as the code lists are.
+// `doctor` is only used inside doctor's message, never printed.
+const FAILURE_STAGES = ['canary', 'doctor', 'extract', 'fetch', 'lock', 'lock_release', 'options', 'report', 'store', 'validate'];
+const STORAGE_STATUSES = ['committed', 'not_started', 'uncertain', 'unchanged'];
+const STOP_REASONS = ['empty_page', 'max_pages', 'short_page', 'single_page'];
+const SKIP_REASONS = ['empty_batch', 'incremental_batch', 'no_history', 'not_configured'];
+
 test('exports surface: every package subpath exposes exactly the frozen names', async () => {
   const pkg = JSON.parse(await readFile(new URL('package.json', ROOT), 'utf8'));
   assert.deepEqual(Object.keys(pkg.exports).sort(), Object.keys(EXPORTS).sort());
@@ -100,6 +107,31 @@ test('warning codes: the set of W_* codes in src/ is frozen', async () => {
     for (const m of text.matchAll(/'(W_[A-Z_]+)'/g)) codes.add(m[1]);
   }
   assert.deepEqual([...codes].sort(), WARNING_CODES);
+});
+
+test('report value sets: stages, storage statuses, stop reasons and skip reasons are frozen', async () => {
+  const srcDir = new URL('src/', ROOT);
+  const files = (await readdir(srcDir, { recursive: true })).filter((f) => f.endsWith('.mjs'));
+  const stages = new Set();
+  const statuses = new Set();
+  const stopReasons = new Set();
+  const skipReasons = new Set();
+  for (const f of files) {
+    const name = f.replaceAll('\\', '/');
+    const text = await readFile(new URL(name, srcDir), 'utf8');
+    for (const m of text.matchAll(/ctx\.stage = '([a-z_]+)'|safeFailure\([^,]+, '([a-z_]+)'\)/g)) stages.add(m[1] ?? m[2]);
+    for (const m of text.matchAll(/storage:? =? ?\{ status: '([a-z_]+)'/g)) statuses.add(m[1]);
+    if (name === 'fetch.mjs') {
+      for (const m of text.matchAll(/stopReason = (?:hasPagination \? null : )?'([a-z_]+)'/g)) stopReasons.add(m[1]);
+    }
+    if (name === 'canary.mjs') {
+      for (const m of text.matchAll(/reason: '([a-z_]+)'/g)) skipReasons.add(m[1]);
+    }
+  }
+  assert.deepEqual([...stages].sort(), FAILURE_STAGES);
+  assert.deepEqual([...statuses].sort(), STORAGE_STATUSES);
+  assert.deepEqual([...stopReasons].sort(), STOP_REASONS);
+  assert.deepEqual([...skipReasons].sort(), SKIP_REASONS);
 });
 
 test('report v2 keys: buildReport top-level keys are frozen', () => {
