@@ -1,4 +1,4 @@
-import { isValidDateOnly } from './normalize.mjs';
+import { applyNormalizer, isValidDateOnly } from './normalize.mjs';
 import { builtinKindNames, resolveKind } from './kinds/index.mjs';
 import { parseTemplate } from './template.mjs';
 
@@ -394,8 +394,15 @@ export function validateFetchConfig(adapter, { since, kinds } = {}) {
   validateFetchSection(adapter, need);
 
   if (since !== undefined) {
-    need(typeof since === 'string' && since.length > 0 && isValidDateOnly(since),
-      'since must be a valid nonempty YYYY-MM-DD date');
+    if (adapter.fetch?.incremental?.type === 'iso-datetime') {
+      // assume_zone only lets a zone-less value pass the check; since itself
+      // is sent unchanged, so the source decides what a missing zone means.
+      need(typeof since === 'string' && applyNormalizer('iso-datetime', since, { assume_zone: 'Z' }) !== null,
+        'since must be a valid date-time (YYYY-MM-DDTHH:mm[:ss[.fff]], optional Z or ±HH:mm) for fetch.incremental.type "iso-datetime"');
+    } else {
+      need(typeof since === 'string' && since.length > 0 && isValidDateOnly(since),
+        'since must be a valid nonempty YYYY-MM-DD date');
+    }
     need(isPlainObject(adapter.fetch?.incremental), 'since requires fetch.incremental to be configured');
   }
 

@@ -242,6 +242,32 @@ test('validateFetchConfig accepts a valid since with matching fetch.incremental'
   assert.equal(validateFetchConfig(withIncremental, { since: '2026-01-01' }).ok, true);
 });
 
+const withDatetime = (type = 'iso-datetime') => ({
+  access: { kind: 'json-api', url: 'https://example.test/api' },
+  fetch: { incremental: { param: 'modified_after', type } },
+});
+
+test('iso-datetime accepts date-time since values', () => {
+  for (const since of ['2026-10-19T04:18:47', '2026-10-20T00:00:00Z', '2026-10-01T00:00:00+05:30',
+    '2026-10-01T00:00', '2026-10-01T00:00:00.123456Z']) {
+    assert.deepEqual(validateFetchConfig(withDatetime(), { since }), { ok: true, errors: [] }, since);
+  }
+});
+
+test('iso-datetime rejects other since values', () => {
+  for (const since of ['2026-10-19', '2026-02-30T00:00:00', '2026-10-19T24:00:00', '2026-10-19 04:18:47',
+    '2026-10-19T04:18:47+25:00', '']) {
+    const r = validateFetchConfig(withDatetime(), { since });
+    assert.equal(r.ok, false, since);
+    assert.match(r.errors.join(' '), /since must be a valid date-time/, since);
+  }
+});
+
+test('iso-date still rejects a date-time since with the same message', () => {
+  const r = validateFetchConfig(withDatetime('iso-date'), { since: '2026-10-19T04:18:47' });
+  assert.deepEqual(r.errors, ['since must be a valid nonempty YYYY-MM-DD date']);
+});
+
 test('verifyAgainstFixtures reports the parse ratio and the failing fields', () => {
   const items = [
     { id: 1, link: 'https://example.test/1', title: 'A' },
