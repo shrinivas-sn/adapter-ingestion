@@ -397,7 +397,9 @@ export function validateFetchConfig(adapter, { since, kinds } = {}) {
     if (adapter.fetch?.incremental?.type === 'iso-datetime') {
       // assume_zone only lets a zone-less value pass the check; since itself
       // is sent unchanged, so the source decides what a missing zone means.
-      need(typeof since === 'string' && applyNormalizer('iso-datetime', since, { assume_zone: 'Z' }) !== null,
+      // The normalizer trims, so padding is rejected here: it would be sent too.
+      need(typeof since === 'string' && since === since.trim()
+        && applyNormalizer('iso-datetime', since, { assume_zone: 'Z' }) !== null,
         'since must be a valid date-time (YYYY-MM-DDTHH:mm[:ss[.fff]], optional Z or ±HH:mm) for fetch.incremental.type "iso-datetime"');
     } else {
       need(typeof since === 'string' && since.length > 0 && isValidDateOnly(since),

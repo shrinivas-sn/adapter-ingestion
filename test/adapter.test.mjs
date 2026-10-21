@@ -256,7 +256,7 @@ test('iso-datetime accepts date-time since values', () => {
 
 test('iso-datetime rejects other since values', () => {
   for (const since of ['2026-10-19', '2026-02-30T00:00:00', '2026-10-19T24:00:00', '2026-10-19 04:18:47',
-    '2026-10-19T04:18:47+25:00', '']) {
+    '2026-10-19T04:18:47+25:00', '', ' 2026-10-19T04:18:47', '2026-10-19T04:18:47\n']) {
     const r = validateFetchConfig(withDatetime(), { since });
     assert.equal(r.ok, false, since);
     assert.match(r.errors.join(' '), /since must be a valid date-time/, since);
