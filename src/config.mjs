@@ -349,6 +349,7 @@ export function validateAdapterConfig(adapter, { kinds } = {}) {
   if (typeof adapter.host === 'string' && adapter.host) {
     need(adapter.host.length <= 253, 'host must be at most 253 characters');
     need(BARE_HOSTNAME.test(adapter.host), 'host must be a bare hostname, no path separators or traversal segments');
+    need(adapter.host === adapter.host.toLowerCase(), 'host must be lower case');
     need(!hasReservedHostBasename(adapter.host),
       'host must not use a Windows reserved device name (CON/NUL/AUX/PRN/COM1-9/LPT1-9)');
   }

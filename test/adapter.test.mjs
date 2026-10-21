@@ -51,6 +51,13 @@ test('host must be a bare hostname, not a path-traversal string', () => {
   assert.match(validateAdapter(bad).errors.join(' '), /bare hostname/);
 });
 
+test('validateAdapter: an upper-case host is rejected as not lower case', () => {
+  const bad = { ...base, host: 'Example.test', access: { ...base.access, url: 'https://example.test/x' } };
+  const result = validateAdapter(bad);
+  assert.equal(result.ok, false);
+  assert.ok(result.errors.includes('host must be lower case'), JSON.stringify(result.errors));
+});
+
 test('canary.max_staleness_days requires staleness_field, and vice versa', () => {
   const onlyMax = { ...base, canary: { max_staleness_days: 7 } };
   assert.match(validateAdapter(onlyMax).errors.join(' '), /must both be set or both omitted/);
