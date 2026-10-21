@@ -1,5 +1,11 @@
 # @shrinivas-sn/adapter-ingestion
 
+## 0.11.0
+
+### Minor Changes
+
+- f8aab0a: `fetch.incremental.type: "iso-datetime"`: `since` can be an ISO date-time, sent to the source unchanged (for APIs such as WordPress REST and GitHub that filter by time). Nothing changes for existing adapters.
+
 ## 0.10.0
 
 ### Minor Changes
