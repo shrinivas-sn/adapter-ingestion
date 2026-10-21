@@ -48,6 +48,9 @@ const REPORT_KEYS = [
 // A_* advice and D_* deprecation notice codes (src/notices.mjs).
 const NOTICE_CODES = ['A_CANARY_NO_HISTORY', 'A_TOP_LEVEL_KEY_TYPO'];
 
+// W_* warning codes in report warnings[] (since 0.10 pinned and in the catalog).
+const WARNING_CODES = ['W_HISTORY_CORRUPT_LINE', 'W_PAGE_LIMIT', 'W_STORE_CORRUPT_LINE', 'W_STORE_INVALID_RECORD'];
+
 const RECORD_KEYS = ['content_hash', 'fetched_at', 'fields', 'id', 'raw', 'source_host', 'source_url'];
 
 test('exports surface: every package subpath exposes exactly the frozen names', async () => {
@@ -88,6 +91,17 @@ test('notice codes: the set of A_*/D_* codes in src/ is frozen', async () => {
   assert.deepEqual([...codes].sort(), NOTICE_CODES);
 });
 
+test('warning codes: the set of W_* codes in src/ is frozen', async () => {
+  const srcDir = new URL('src/', ROOT);
+  const files = (await readdir(srcDir, { recursive: true })).filter((f) => f.endsWith('.mjs'));
+  const codes = new Set();
+  for (const f of files) {
+    const text = await readFile(new URL(f.replaceAll('\\', '/'), srcDir), 'utf8');
+    for (const m of text.matchAll(/'(W_[A-Z_]+)'/g)) codes.add(m[1]);
+  }
+  assert.deepEqual([...codes].sort(), WARNING_CODES);
+});
+
 test('report v2 keys: buildReport top-level keys are frozen', () => {
   const report = buildReport({});
   assert.equal(report.report_version, 2);
@@ -117,7 +131,7 @@ test('repo adapters stay valid', async () => {
 
 test('code catalog covers exactly the frozen codes', async () => {
   const { CODES } = await import(new URL('src/codes.mjs', ROOT));
-  assert.deepEqual(Object.keys(CODES).sort(), [...ERROR_CODES, ...NOTICE_CODES].sort());
+  assert.deepEqual(Object.keys(CODES).sort(), [...ERROR_CODES, ...NOTICE_CODES, ...WARNING_CODES].sort());
   for (const [code, entry] of Object.entries(CODES)) {
     for (const field of ['kind', 'meaning', 'cause', 'fix']) {
       assert.ok(typeof entry[field] === 'string' && entry[field].length > 0, `${code}.${field}`);

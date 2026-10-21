@@ -2,7 +2,7 @@
 // The CLI's `explain` command and AGENTS.md's code table are both built from
 // this. Keys are unquoted on purpose: the contract-freeze tests find codes by
 // their quoted uses in src/, and this catalog must never count as a use.
-// A test keeps it covering exactly the frozen E_* and notice codes.
+// A test keeps it covering exactly the frozen E_*, notice and W_* codes.
 export const CODES = Object.freeze({
   E_ABORTED: {
     kind: 'error',
@@ -189,5 +189,29 @@ export const CODES = Object.freeze({
     meaning: 'A top-level key is one edit away from fetch, records_path, required or canary, so that setting is probably misspelled and is being ignored.',
     cause: 'Top-level keys are free for your own metadata, so the validator cannot reject a misspelled one.',
     fix: 'Rename it to the suggested key. If it is your own metadata, start its name with _ so it is never flagged.',
+  },
+  W_HISTORY_CORRUPT_LINE: {
+    kind: 'warning',
+    meaning: 'A line in the history file could not be read, so the canary skipped it.',
+    cause: 'The file was edited by hand, cut short, or merged with a conflict.',
+    fix: 'Nothing to do for one run. If it repeats, remove the broken line from the history file; it otherwise stays until it ages out.',
+  },
+  W_PAGE_LIMIT: {
+    kind: 'warning',
+    meaning: 'Pagination stopped at fetch.pagination.max_pages while pages were still full, because allow_truncation is true.',
+    cause: 'The source has more pages than max_pages.',
+    fix: 'Expected with allow_truncation. Raise max_pages if you need every page.',
+  },
+  W_STORE_CORRUPT_LINE: {
+    kind: 'warning',
+    meaning: 'A store line is not a JSON object, so it was skipped when reading the store.',
+    cause: 'The file was edited by hand, or a write was cut short by a crash or a full disk.',
+    fix: 'Records on other lines are unaffected. Remove or repair the line once no run is active.',
+  },
+  W_STORE_INVALID_RECORD: {
+    kind: 'warning',
+    meaning: 'A store line is a JSON object without a nonempty id or content_hash, so it was skipped.',
+    cause: 'The line was written by other code, or edited by hand.',
+    fix: 'Remove or repair the line once no run is active; only this package should append to the store.',
   },
 });

@@ -86,6 +86,14 @@ test('bin explain: a known code prints meaning, cause and fix', async () => {
   assert.match(advice.stdout, /^A_CANARY_NO_HISTORY \(advice\)\nmeaning: /);
 });
 
+test('bin explain: a W_* code is explained', async () => {
+  const json = await runBin(['explain', 'W_PAGE_LIMIT', '--json']);
+  assert.equal(json.code, 0);
+  const out = JSON.parse(json.stdout);
+  assert.deepEqual(Object.keys(out), ['code', 'kind', 'meaning', 'cause', 'fix']);
+  assert.equal(out.kind, 'warning');
+});
+
 test('bin explain: an unknown code exits 2', async () => {
   const { code, stdout } = await runBin(['explain', 'NOPE', '--json']);
   assert.equal(code, 2);
