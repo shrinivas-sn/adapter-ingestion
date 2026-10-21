@@ -179,6 +179,18 @@ test('a colliding incremental param and pagination param is rejected', () => {
   assert.match(validateAdapter(bad).errors.join(' '), /collide/);
 });
 
+test('an iso-datetime incremental type is accepted', () => {
+  const ok = { ...base, fetch: { ...base.fetch, incremental: { param: 'modified_after', type: 'iso-datetime' } } };
+  assert.deepEqual(validateAdapter(ok), { ok: true, errors: [] });
+});
+
+test('an unknown incremental type is rejected and names both values', () => {
+  const bad = { ...base, fetch: { ...base.fetch, incremental: { param: 'modified_after', type: 'iso-time' } } };
+  const r = validateAdapter(bad);
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(' '), /"iso-date" or "iso-datetime"/);
+});
+
 // --- V04: reserved names in map field names / path segments ---
 
 test('a map field name of __proto__ is rejected without mutating Object.prototype', () => {

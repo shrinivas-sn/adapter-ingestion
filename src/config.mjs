@@ -3,6 +3,7 @@ import { builtinKindNames, resolveKind } from './kinds/index.mjs';
 import { parseTemplate } from './template.mjs';
 
 const KNOWN_NORMALIZERS = new Set(['text', 'number', 'iso-date', 'iso-datetime', 'bool']);
+const INCREMENTAL_TYPES = new Set(['iso-date', 'iso-datetime']);
 const MANDATORY_MAP_KEYS = ['source_id', 'url'];
 const RESERVED_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
 const RESERVED_HOST_BASENAME = /^(CON|NUL|AUX|PRN|COM[1-9]|LPT[1-9])$/i;
@@ -153,7 +154,7 @@ function validateIncrementalSection(fetchCfg, need) {
   if (!isPlainObject(inc)) return;
   checkUnknownKeys(inc, KNOWN_INCREMENTAL_KEYS, 'fetch.incremental', need);
   need(typeof inc.param === 'string' && inc.param.length > 0, 'fetch.incremental.param must be a nonempty string');
-  need(inc.type === 'iso-date', 'fetch.incremental.type must be "iso-date"');
+  need(INCREMENTAL_TYPES.has(inc.type), 'fetch.incremental.type must be "iso-date" or "iso-datetime"');
   const p = fetchCfg?.pagination;
   if (isPlainObject(p) && typeof inc.param === 'string') {
     need(inc.param !== p.param, 'fetch.incremental.param must not collide with fetch.pagination.param');
