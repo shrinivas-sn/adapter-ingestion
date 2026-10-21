@@ -204,7 +204,17 @@ const full: Adapter = {
   map: { source_id: { template: '{region}:{year}' }, url: { template: 'https://example.test/{region}' } },
   canary: { min_records: 1, median_window: 5, count_drop_ratio: 0.4 },
 };
-const withMeta: Adapter = { ...full, _notes: 'x' };
+// Top-level metadata keys reach an Adapter through a variable, as from JSON.
+const meta = { ...full, _notes: 'x' };
+const withMeta: Adapter = meta;
+// An adapter typed with the caller's own interface must keep compiling (it did on 0.9).
+interface OwnAdapter {
+  version: 1; host: string;
+  access: { tier: number; kind: string; url: string };
+  map: Record<string, { path?: string }>;
+}
+declare const own: OwnAdapter;
+const fromInterface: Adapter = own;
 const badFetch: Adapter = {
   ...full,
   // @ts-expect-error unknown fetch key
@@ -223,7 +233,7 @@ export async function go() {
   const sr: 'single_page' | 'empty_page' | 'short_page' | 'max_pages' | null = r.fetch.stop_reason;
   // @ts-expect-error storeFile must be a string
   await runIngest({ ...options, paths: { storeFile: 1, runsDir: 'runs' } });
-  return [checked, version, codes, outcome, stage, sr, withMeta, badFetch, badRule];
+  return [checked, version, codes, outcome, stage, sr, withMeta, fromInterface, badFetch, badRule];
 }
 `;
 

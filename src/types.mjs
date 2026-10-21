@@ -57,7 +57,11 @@
  */
 
 /**
- * @typedef {object} AdapterCore
+ * One source's adapter (see schema/adapter.schema.json for every key). The
+ * engine also allows top-level keys of your own (start them with `_`); they
+ * are left out here on purpose, because an index signature would stop an
+ * adapter typed with your own interface from matching.
+ * @typedef {object} Adapter
  * @property {string} [$schema]
  * @property {1} version
  * @property {string} host
@@ -68,12 +72,6 @@
  * @property {string[]} [required]
  * @property {AdapterCanary} [canary]
  * @property {AdapterHtml} [html]
- */
-
-/**
- * One source's adapter (see schema/adapter.schema.json for every key). Other
- * top-level keys are your own metadata, as the engine allows.
- * @typedef {AdapterCore & Record<string, unknown>} Adapter
  */
 
 /**
