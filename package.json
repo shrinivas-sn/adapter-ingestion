@@ -1,6 +1,6 @@
 {
   "name": "@shrinivas-sn/adapter-ingestion",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Scheduled ingestion of JSON APIs, CSV files, RSS and Atom feeds and HTML pages into a local JSONL store, with change detection, a read-time relevance filter, and a canary that flags a source that changed shape or went quiet.",
   "type": "module",
   "engines": {
